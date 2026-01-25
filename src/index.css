@@ -1,0 +1,48 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 14px; /* Base font size for rem calculations (87.5% of 16px) */
+}
+
+/* Responsive base font size */
+@media (max-width: 600px) {
+  html {
+    font-size: 12.25px; /* 87.5% of 14px */
+  }
+}
+
+@media (min-width: 1200px) {
+  html {
+    font-size: 15.75px; /* 87.5% of 18px */
+  }
+}
+
+body {
+  font-size: 1rem;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  /* Background color will be set by theme */
+}
+
+/* Theme colors */
+:root {
+  --primary-green: #4CAF50;
+  --light-green: #81C784;
+  --grey-button: #9E9E9E;
+  --grey-button-hover: #757575;
+  --grey-text: #616161;
+  --light-grey-bg: #f5f5f5;
+  --white: #ffffff;
+  --border-grey: #e0e0e0;
+}
+

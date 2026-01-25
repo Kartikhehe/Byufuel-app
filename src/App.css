@@ -1,0 +1,86 @@
+/* Ensure Leaflet markers stay visible */
+.leaflet-marker-icon {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+.custom-marker {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+.custom-marker.selected,
+.custom-marker.unselected {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+/* Custom styles for Leaflet controls - Responsive */
+.leaflet-control-zoom {
+  border-radius: clamp(0.5rem, 2vw, 0.75rem) !important;
+  overflow: hidden !important;
+}
+
+.leaflet-control-zoom a {
+  border-radius: 0 !important;
+  width: clamp(2rem, 5vw, 2.125rem) !important;
+  height: clamp(2rem, 5vw, 2.125rem) !important;
+  line-height: clamp(2rem, 5vw, 2.125rem) !important;
+}
+
+/* Responsive adjustments for mobile */
+@media (max-width: 600px) {
+  .leaflet-control-zoom a {
+    width: 2rem !important;
+    height: 2rem !important;
+    line-height: 2rem !important;
+  }
+  
+  .map-controls-container {
+    margin-right: 0.5rem !important;
+  }
+}
+
+.leaflet-control-zoom-in {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Map controls container (search, locate, zoom grouped together) */
+.map-controls-container {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+}
+
+.leaflet-control-search,
+.leaflet-control-locate {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.leaflet-control-search:hover,
+.leaflet-control-locate:hover {
+  opacity: 0.8;
+  background-color: rgba(76, 175, 80, 0.1) !important;
+}
+
+/* Ensure zoom control is positioned right after the custom controls */
+.leaflet-top.leaflet-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* Pulse animation used for paused-exit button */
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
