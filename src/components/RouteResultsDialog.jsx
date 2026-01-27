@@ -4,14 +4,19 @@ import { Dialog, DialogTitle, DialogContent, Button, Box, useTheme, Typography, 
 import { ExpandMore, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime, LocationOn, Navigation, OpenInNew, ArrowDropDownCircle, ContentCopy } from '@mui/icons-material';
 
 function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
+  // Guard clause - must be first to ensure consistent hook order
+  if (!open) {
+    return null;
+  }
+
   const theme = useTheme();
   const [expandedWarehouse, setExpandedWarehouse] = useState(null);
   const [expandedUnassigned, setExpandedUnassigned] = useState(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Move early return after hooks to maintain consistent hook call order
-  if (!open || !results || !results.routes) {
+  // Check for valid results after hooks
+  if (!results || !results.routes) {
     return null;
   }
 
