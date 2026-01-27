@@ -119,6 +119,18 @@ export const fleetsAPI = {
     return response.json();
   },
 
+  getGroupedByWarehouse: async () => {
+    const response = await fetch(`${API_BASE_URL}/fleets/grouped-by-warehouse`, {
+      credentials: 'include',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Authentication required');
+      throw new Error('Failed to fetch grouped fleets');
+    }
+    return response.json();
+  },
+
   getById: async (id) => {
     const response = await fetch(`${API_BASE_URL}/fleets/${id}`, {
       credentials: 'include',
@@ -139,7 +151,7 @@ export const fleetsAPI = {
         count: fleet.count,
         capacity: fleet.capacity || null,
         fuel_type: fleet.fuel_type || null,
-        area: fleet.area || null,
+        warehouse_id: fleet.warehouse_id || null,
         available: fleet.available,
       }),
     });
@@ -162,7 +174,7 @@ export const fleetsAPI = {
         count: fleet.count,
         capacity: fleet.capacity || null,
         fuel_type: fleet.fuel_type || null,
-        area: fleet.area || null,
+        warehouse_id: fleet.warehouse_id || null,
         available: fleet.available,
       }),
     });
@@ -222,7 +234,6 @@ export const restaurantsAPI = {
         area: restaurant.area || '',
         city: restaurant.city || '',
         pincode: restaurant.pincode || null,
-        amount: restaurant.amount || null,
         latitude: restaurant.latitude || null,
         longitude: restaurant.longitude || null,
       }),
@@ -245,7 +256,6 @@ export const restaurantsAPI = {
         area: restaurant.area || '',
         city: restaurant.city || '',
         pincode: restaurant.pincode || null,
-        amount: restaurant.amount || null,
         latitude: restaurant.latitude || null,
         longitude: restaurant.longitude || null,
       }),
@@ -324,5 +334,23 @@ export const authAPI = {
       credentials: 'include',
       headers: getAuthHeaders(),
     });
+  },
+};
+
+// Optimize Route API
+export const optimizeAPI = {
+  optimizeRoute: async (data) => {
+    const response = await fetch(`${API_BASE_URL}/optimize/route`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Authentication required');
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to optimize route');
+    }
+    return response.json();
   },
 };

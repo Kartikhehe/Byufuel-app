@@ -1,22 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, Button, TextField, Box, useTheme, CircularProgress, Typography } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, Button, TextField, Box, useTheme, CircularProgress, Typography, InputLabel, MenuItem, FormControl, Select } from '@mui/material';
 import { LocalShipping as LocalShippingIcon } from '@mui/icons-material';
-import { fleetsAPI } from '../services/api';
+import { fleetsAPI, warehousesAPI } from '../services/api';
 
 function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editData }) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehousesLoading, setWarehousesLoading] = useState(false);
+  
   const [vehicle, setVehicle] = useState('');
   const [vehicleType, setVehicleType] = useState('Truck');
   const [count, setCount] = useState(1);
   const [available, setAvailable] = useState(1);
   const [capacity, setCapacity] = useState('');
   const [fuelType, setFuelType] = useState('Diesel');
-  const [area, setArea] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
   const [errors, setErrors] = useState({});
 
   const isEditing = Boolean(editData?.id);
 
+  // Load warehouses when dialog opens
+  useEffect(() => {
+    const loadWarehouses = async () => {
+      try {
+        setWarehousesLoading(true);
+        const data = await warehousesAPI.getAll();
+        setWarehouses(data);
+      } catch (err) {
+        console.error('Error loading warehouses:', err);
+        setWarehouses([]);
+      } finally {
+        setWarehousesLoading(false);
+      }
+    };
+    if (open) loadWarehouses();
+  }, [open]);
+
+  // Initialize form with edit data or reset for new entry
   useEffect(() => {
     if (open) {
       if (editData) {
@@ -26,7 +47,7 @@ function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editDat
         setAvailable(editData.available || 1);
         setCapacity(editData.capacity || '');
         setFuelType(editData.fuel_type || 'Diesel');
-        setArea(editData.area || '');
+        setWarehouseId(editData.warehouse_id || '');
       } else {
         // Reset form for new entry
         setVehicle('');
@@ -35,7 +56,7 @@ function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editDat
         setAvailable(1);
         setCapacity('');
         setFuelType('Diesel');
-        setArea('');
+        setWarehouseId('');
       }
       setErrors({});
     }
@@ -70,7 +91,7 @@ function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editDat
           available: parseInt(available) || 1,
           capacity: capacity ? parseInt(capacity) : null,
           fuel_type: fuelType,
-          area: area.trim(),
+          warehouse_id: warehouseId || null,
         });
         onShowSnackbar?.('Fleet updated successfully', 'success');
         onFleetCreated?.(updated);
@@ -83,7 +104,7 @@ function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editDat
           available: parseInt(available) || 1,
           capacity: capacity ? parseInt(capacity) : null,
           fuel_type: fuelType,
-          area: area.trim(),
+          warehouse_id: warehouseId || null,
         });
         onShowSnackbar?.('Fleet created successfully', 'success');
         onFleetCreated?.(fleet);
@@ -226,15 +247,25 @@ function AddFleetDialog({ open, onClose, onShowSnackbar, onFleetCreated, editDat
             </TextField>
           </Box>
 
-          <TextField
-            label="Area / Zone"
-            value={area}
-            onChange={(e) => setArea(e.target.value)}
-            placeholder="e.g., North Zone"
-            variant="outlined"
-            fullWidth
-            disabled={loading}
-          />
+          <FormControl fullWidth>
+            <InputLabel id="warehouse-select-label">Warehouse</InputLabel>
+            <Select
+              labelId="warehouse-select-label"
+              value={warehouseId}
+              onChange={(e) => setWarehouseId(e.target.value)}
+              label="Warehouse"
+              disabled={warehousesLoading}
+            >
+              <MenuItem value="">
+                <em>None</em>
+              </MenuItem>
+              {warehouses.map((warehouse) => (
+                <MenuItem key={warehouse.id} value={warehouse.id}>
+                  {warehouse.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
 
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 1 }}>
             <Button

@@ -85,29 +85,15 @@ function RestaurantDetailsDialog({ open, selectedRestaurantId, restaurantData, s
             />
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            {/* Pincode */}
-            <TextField
-              label="Pincode"
-              value={restaurantData.pincode || ''}
-              onChange={(e) => setRestaurantData(prev => ({ ...prev, pincode: e.target.value }))}
-              type="number"
-              variant="outlined"
-              sx={{ flex: 1 }}
-            />
-            {/* Amount */}
-            <TextField
-              label="Amount (₹)"
-              value={restaurantData.amount || ''}
-              onChange={(e) => setRestaurantData(prev => ({ ...prev, amount: e.target.value }))}
-              type="number"
-              variant="outlined"
-              sx={{ flex: 1 }}
-              InputProps={{
-                startAdornment: <Typography sx={{ mr: 0.5 }}>₹</Typography>
-              }}
-            />
-          </Box>
+          {/* Pincode */}
+          <TextField
+            label="Pincode"
+            value={restaurantData.pincode || ''}
+            onChange={(e) => setRestaurantData(prev => ({ ...prev, pincode: e.target.value }))}
+            type="number"
+            variant="outlined"
+            sx={{ flex: 1 }}
+          />
 
           {/* Location Section */}
           <Box sx={{ 

@@ -10,7 +10,6 @@ function AddRestaurantDialog({ open, onClose, onShowSnackbar, onRestaurantCreate
   const [area, setArea] = useState('');
   const [city, setCity] = useState('');
   const [pincode, setPincode] = useState('');
-  const [amount, setAmount] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [errors, setErrors] = useState({});
@@ -20,7 +19,6 @@ function AddRestaurantDialog({ open, onClose, onShowSnackbar, onRestaurantCreate
     setArea('');
     setCity('');
     setPincode('');
-    setAmount('');
     setLatitude('');
     setLongitude('');
     setErrors({});
@@ -50,7 +48,6 @@ function AddRestaurantDialog({ open, onClose, onShowSnackbar, onRestaurantCreate
         area: area.trim(),
         city: city.trim(),
         pincode: pincode ? parseInt(pincode) : null,
-        amount: amount ? parseFloat(amount) : null,
         latitude: latitude || null,
         longitude: longitude || null,
       });
@@ -144,17 +141,6 @@ function AddRestaurantDialog({ open, onClose, onShowSnackbar, onRestaurantCreate
               sx={{ flex: 1 }}
               disabled={loading}
               inputProps={{ min: 100000, max: 999999 }}
-            />
-            <TextField
-              label="Amount (₹)"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              type="number"
-              placeholder="e.g., 31.0"
-              variant="outlined"
-              sx={{ flex: 1 }}
-              disabled={loading}
-              inputProps={{ min: 0, step: 0.01 }}
             />
           </Box>
 

@@ -35,6 +35,8 @@ import AddFleetDialog from '../components/AddFleetDialog';
 import AddRestaurantDialog from '../components/AddRestaurantDialog';
 import RestaurantListDialog from '../components/RestaurantListDialog';
 import RestaurantDetailsDialog from '../components/RestaurantDetailsDialog';
+import OptimizeRouteDialog from '../components/OptimizeRouteDialog';
+import RouteResultsDialog from '../components/RouteResultsDialog';
 import GPSWarningDialog from '../components/GPSWarningDialog';
 import BottomSheet from '../components/BottomSheet';
 import WaypointDetails from '../components/WaypointDetails';
@@ -71,6 +73,9 @@ function App() {
   const [addRestaurantDialogOpen, setAddRestaurantDialogOpen] = useState(false);
   const [restaurantListDialogOpen, setRestaurantListDialogOpen] = useState(false);
   const [restaurantDetailsOpen, setRestaurantDetailsOpen] = useState(false);
+  const [optimizeRouteDialogOpen, setOptimizeRouteDialogOpen] = useState(false);
+  const [routeResultsOpen, setRouteResultsOpen] = useState(false);
+  const [routeOptimizationResults, setRouteOptimizationResults] = useState(null);
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [restaurantData, setRestaurantData] = useState({});
   const [restaurantLocationSelectionActive, setRestaurantLocationSelectionActive] = useState(false);
@@ -232,6 +237,12 @@ function App() {
         return;
       }
       setRestaurantListDialogOpen(true);
+    } else if (item === 'Optimize Route') {
+      if (!isAuthenticated) {
+        setLoginPromptOpen(true);
+        return;
+      }
+      setOptimizeRouteDialogOpen(true);
     }
     
     if (isMobile) {
@@ -1173,6 +1184,33 @@ function App() {
           currentLocation={coordinates}
           locationSelectionActive={restaurantLocationSelectionActive}
           onToggleLocationSelection={handleRestaurantToggleLocationSelection}
+        />
+        <OptimizeRouteDialog
+          open={optimizeRouteDialogOpen}
+          onClose={() => setOptimizeRouteDialogOpen(false)}
+          onShowSnackbar={showSnackbar}
+          onNext={(results) => {
+            console.log('Route optimization results:', results);
+            setRouteOptimizationResults(results);
+            setRouteResultsOpen(true);
+            setOptimizeRouteDialogOpen(false);
+          }}
+        />
+        <RouteResultsDialog
+          open={routeResultsOpen}
+          onClose={() => setRouteResultsOpen(false)}
+          results={routeOptimizationResults}
+          onRestaurantClick={(stop) => {
+            // Navigate to restaurant location on map
+            const waypoint = routeOptimizationResults?.waypoints?.find(w => w.index === stop.index);
+            if (waypoint && waypoint.latitude && waypoint.longitude) {
+              handleNavigateToRestaurantLocation({
+                outlet_name: stop.name,
+                lat: waypoint.latitude,
+                lng: waypoint.longitude
+              });
+            }
+          }}
         />
         <WaypointDetails
           open={waypointDetailsOpen}

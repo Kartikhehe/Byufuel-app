@@ -16,6 +16,7 @@ import {
   BookmarkAddedOutlined as BookmarkAddedOutlinedIcon,
   LocalShipping as LocalShippingIcon,
   Restaurant as RestaurantIcon,
+  Route as RouteIcon,
   ChevronLeft,
   ChevronRight
 } from '@mui/icons-material';
@@ -31,6 +32,7 @@ function Sidebar({ sidebarOpen, onToggle, isMobile, onMenuItemClick }) {
     { text: 'Warehouses', icon: <BookmarkAddedOutlinedIcon />, action: () => onMenuItemClick('Warehouses') },
     { text: 'View Fleets', icon: <LocalShippingIcon />, action: () => onMenuItemClick('View Fleets') },
     { text: 'Restaurants', icon: <RestaurantIcon />, action: () => onMenuItemClick('Restaurants') },
+    { text: 'Optimize Route', icon: <RouteIcon />, action: () => onMenuItemClick('Optimize Route') },
   ];
 
   return (

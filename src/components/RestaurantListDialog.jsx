@@ -170,7 +170,6 @@ function RestaurantListDialog({ open, onClose, onShowSnackbar, onAddNew, onSelec
                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${theme.palette.divider}` }}>Area</th>
                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${theme.palette.divider}` }}>City</th>
                   <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: `1px solid ${theme.palette.divider}` }}>Pincode</th>
-                  <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: `1px solid ${theme.palette.divider}` }}>Amount</th>
                   <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: `1px solid ${theme.palette.divider}` }}>Location</th>
                 </tr>
               </thead>
@@ -196,9 +195,6 @@ function RestaurantListDialog({ open, onClose, onShowSnackbar, onAddNew, onSelec
                     <td style={{ padding: '12px', textAlign: 'right', borderBottom: `1px solid ${theme.palette.divider}` }}>
                       {restaurant.pincode || '-'}
                     </td>
-                    <td style={{ padding: '12px', textAlign: 'right', borderBottom: `1px solid ${theme.palette.divider}` }}>
-                      {restaurant.amount ? `₹${typeof restaurant.amount === 'number' ? restaurant.amount.toFixed(2) : parseFloat(restaurant.amount || 0).toFixed(2)}` : '-'}
-                    </td>
                     <td style={{ padding: '12px', borderBottom: `1px solid ${theme.palette.divider}` }}>
                       <Typography variant="caption" color="text.secondary">
                         {restaurant.latitude && restaurant.longitude ? `${parseFloat(restaurant.latitude).toFixed(4)}, ${parseFloat(restaurant.longitude).toFixed(4)}` : '-'}
@@ -208,7 +204,7 @@ function RestaurantListDialog({ open, onClose, onShowSnackbar, onAddNew, onSelec
                 ))}
                 {processedRestaurants.length === 0 && !restaurantsLoading && (
                   <tr>
-                    <td colSpan={6} align="center" style={{ padding: '24px', color: theme.palette.text.secondary }}>
+                    <td colSpan={5} align="center" style={{ padding: '24px', color: theme.palette.text.secondary }}>
                       <Typography>No restaurants found</Typography>
                     </td>
                   </tr>
