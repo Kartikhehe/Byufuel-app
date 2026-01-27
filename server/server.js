@@ -1,0 +1,102 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import authRoutes from './routes/auth.js';
+import warehousesRoutes from './routes/warehouses.js';
+import fleetsRoutes from './routes/fleets.js';
+import restaurantsRoutes from './routes/restaurants.js';
+import optimizeRoutes from './routes/optimize.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: join(__dirname, '.env') });
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+        return callback(null, true);
+      }
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Set-Cookie'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+
+const setCorsHeadersSafe = (req, res) => {
+  const incomingOrigin = req.headers.origin;
+  if (!incomingOrigin) return false;
+  if (typeof incomingOrigin !== 'string' || incomingOrigin.includes(',') || incomingOrigin.includes('\n') || incomingOrigin.includes('\r')) return false;
+  const originAllowed = allowedOrigins.includes(incomingOrigin) || incomingOrigin.includes('localhost') || incomingOrigin.includes('127.0.0.1');
+  if (!originAllowed) return false;
+  res.header('Access-Control-Allow-Origin', incomingOrigin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  return true;
+};
+
+app.use((req, res, next) => {
+  setCorsHeadersSafe(req, res);
+  next();
+});
+
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.options('*', (req, res) => {
+  setCorsHeadersSafe(req, res);
+  res.sendStatus(204);
+});
+
+// Routes
+app.use('/auth', authRoutes);
+app.use('/api/warehouses', warehousesRoutes);
+app.use('/api/fleets', fleetsRoutes);
+app.use('/api/restaurants', restaurantsRoutes);
+app.use('/api/optimize', optimizeRoutes);
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Server is running' });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'CORS: Origin not allowed' });
+  }
+  setCorsHeadersSafe(req, res);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
