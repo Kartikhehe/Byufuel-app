@@ -10,9 +10,11 @@ function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  if (!results || !results.routes) {
+  // Move early return after hooks to maintain consistent hook call order
+  if (!open || !results || !results.routes) {
     return null;
   }
+
 
   const { routes, summary, waypoints } = results;
 
