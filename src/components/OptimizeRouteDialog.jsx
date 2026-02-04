@@ -85,6 +85,15 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
     if (open && step === 2) loadFleets();
   }, [open, step]);
 
+  // Helper function to calculate average from UCO pickup history array
+  const calculateAverageUCO = (history) => {
+    if (!history || !Array.isArray(history) || history.length === 0) {
+      return 0;
+    }
+    const sum = history.reduce((acc, val) => acc + (val || 0), 0);
+    return Math.round((sum / history.length) * 100) / 100; // Round to 2 decimal places
+  };
+
   // Load restaurants when step changes to 3
   useEffect(() => {
     const loadRestaurants = async () => {
@@ -92,6 +101,14 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
         setRestaurantsLoading(true);
         const data = await restaurantsAPI.getAll();
         setRestaurants(data);
+        
+        // Calculate average UCO for each restaurant and set as default
+        const defaultAmounts = {};
+        data.forEach(restaurant => {
+          const avgUCO = calculateAverageUCO(restaurant.uco_pickup_history);
+          defaultAmounts[restaurant.id] = avgUCO.toString();
+        });
+        setRestaurantAmounts(defaultAmounts);
       } catch (err) {
         console.error('Error loading restaurants:', err);
         setRestaurants([]);

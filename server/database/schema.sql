@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    uco_pickup_history INTEGER[] DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT outlet_name_unique UNIQUE (outlet_name)
