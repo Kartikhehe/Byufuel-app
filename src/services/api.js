@@ -1,6 +1,6 @@
-// API configuration - using localhost for development
-const API_BASE_URL = 'http://localhost:3001/api';
-const AUTH_BASE_URL = 'http://localhost:3001/auth';
+// API configuration - using environment variables for backend URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+const AUTH_BASE_URL = import.meta.env.VITE_AUTH_BASE_URL || 'http://localhost:3001/auth';
 
 const getAuthToken = () => {
   return localStorage.getItem('authToken');
