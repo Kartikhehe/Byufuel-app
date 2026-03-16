@@ -5,9 +5,9 @@ import pool from '../database/connection.js';
 const setCorsHeaders = (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = [
-    'https://terr-aqua-survey-platform.vercel.app',
+    'https://byufuel-app.vercel.app',
     'http://localhost:5173',
-    'http://localhost:3000',
+    'http://localhost:3001',
     process.env.FRONTEND_URL,
   ].filter(Boolean);
 
@@ -91,3 +91,4 @@ export const authenticateToken = async (req, res, next) => {
     return res.status(500).json({ error: 'Authentication error' });
   }
 };
+

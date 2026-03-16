@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogTitle, DialogContent, Button, TextField, List, ListItem, Box, useTheme, CircularProgress, Typography, InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText, IconButton, Checkbox, Stepper, Step, StepLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
-import { Folder as FolderIcon, Search, Sort, SwapVertRounded, ArrowBack, ArrowForward, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon } from '@mui/icons-material';
+import { Folder as FolderIcon, Search, Sort, SwapVertRounded, ArrowBack, ArrowForward, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, Star as StarIcon, StarBorder as StarBorderIcon } from '@mui/icons-material';
 import { warehousesAPI, fleetsAPI, restaurantsAPI, optimizeAPI } from '../services/api';
 
 function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
@@ -19,18 +19,19 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
   const [fleetsLoading, setFleetsLoading] = useState(false);
   const [fleetAvailabilities, setFleetAvailabilities] = useState({});
   
-  // Step 3: Restaurants
+// Step 3: Restaurants
   const [restaurants, setRestaurants] = useState([]);
   const [selectedRestaurantIds, setSelectedRestaurantIds] = useState([]);
   const [restaurantsLoading, setRestaurantsLoading] = useState(false);
   const [restaurantAmounts, setRestaurantAmounts] = useState({});
+  const [restaurantPriorities, setRestaurantPriorities] = useState({}); // priority: 0 = regular, 1 = VIP
 
   // Search and Sort
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState('newest');
   const [sortMenuAnchor, setSortMenuAnchor] = useState(null);
 
-  // Reset state when dialog opens
+// Reset state when dialog opens
   useEffect(() => {
     if (open) {
       setStep(1);
@@ -39,6 +40,7 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
       setFleetAvailabilities({});
       setSelectedRestaurantIds([]);
       setRestaurantAmounts({});
+      setRestaurantPriorities({}); // Reset priorities
       setSearchQuery('');
       setSortOption('newest');
     }
@@ -244,12 +246,45 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
     });
   };
 
-  // Handle amount change for restaurant
+// Handle amount change for restaurant
   const handleRestaurantAmountChange = (restaurantId, value) => {
     setRestaurantAmounts(prev => ({
       ...prev,
       [restaurantId]: value
     }));
+  };
+
+  // Handle priority toggle (cycle through 0 -> 1 -> 2 -> 0)
+  // 0 = Regular (no star)
+  // 1 = Priority (1 star) - tries to serve but can skip if needed
+  // 2 = Critical (2 stars) - must serve first, separate vehicle if needed
+  const handlePriorityToggle = (restaurantId) => {
+    setRestaurantPriorities(prev => ({
+      ...prev,
+      [restaurantId]: ((prev[restaurantId] || 0) + 1) % 3
+    }));
+  };
+
+  // Helper to render stars based on priority level
+  const renderPriorityStars = (priority) => {
+    if (priority === 2) {
+      return (
+        <Box sx={{ display: 'flex', gap: 0.25 }}>
+          <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
+          <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
+        </Box>
+      );
+    } else if (priority === 1) {
+      return <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />;
+    }
+    return <StarBorderIcon sx={{ fontSize: 16, color: 'text.disabled' }} />;
+  };
+
+  // Get priority label for display
+  const getPriorityLabel = (priority) => {
+    if (priority === 2) return 'Critical';
+    if (priority === 1) return 'Priority';
+    return 'Regular';
   };
 
   // Format address for display
@@ -277,7 +312,7 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
     setStep(newStep);
   };
 
-  const handleOptimize = async () => {
+const handleOptimize = async () => {
     if (selectedRestaurantIds.length === 0) {
       if (onShowSnackbar) onShowSnackbar('Please select at least one restaurant', 'warning');
       return;
@@ -286,6 +321,27 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
     setOptimizing(true);
 
     try {
+      // Build restaurants data with priorities
+      const restaurantsData = restaurants
+        .filter(r => selectedRestaurantIds.includes(r.id))
+        .map(r => ({
+          id: r.id,
+          name: r.outlet_name,
+          address: formatAddress(r.area, 30) + (r.city ? `, ${r.city}` : ''),
+          amount: restaurantAmounts[r.id] || '',
+          latitude: r.latitude,
+          longitude: r.longitude,
+          priority: restaurantPriorities[r.id] || 0 // 0 = regular, 1 = VIP
+        }));
+
+      // Verify that at least some restaurants have UCO amounts
+      const validAmounts = restaurantsData.filter(r => r.amount && parseFloat(r.amount) > 0);
+      if (validAmounts.length === 0) {
+        if (onShowSnackbar) onShowSnackbar('Please enter UCO amounts for at least one restaurant', 'warning');
+        setOptimizing(false);
+        return;
+      }
+
       const result = {
         warehouses: selectedWarehouses.map(w => ({
           id: w.id,
@@ -306,16 +362,7 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
             availableCount: fleetAvailabilities[fleet.id] !== undefined ? fleetAvailabilities[fleet.id] : fleet.available
           }))
         })),
-        restaurants: restaurants
-          .filter(r => selectedRestaurantIds.includes(r.id))
-          .map(r => ({
-            id: r.id,
-            name: r.outlet_name,
-            address: formatAddress(r.area, 30) + (r.city ? `, ${r.city}` : ''),
-            amount: restaurantAmounts[r.id] || '',
-            latitude: r.latitude,
-            longitude: r.longitude
-          }))
+        restaurants: restaurantsData
       };
 
       // Call backend API for route optimization
@@ -663,7 +710,7 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
               </Box>
             ) : (
               <List sx={{ maxHeight: '40vh', overflow: 'auto', mb: 3, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
-                {processedItems.map((restaurant) => (
+{processedItems.map((restaurant) => (
                   <ListItem key={restaurant.id} disablePadding>
                     <Box
                       onClick={() => handleRestaurantToggle(restaurant.id)}
@@ -697,6 +744,31 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
                           {formatAddress((restaurant.area || '') + (restaurant.city ? `, ${restaurant.city}` : ''), 40)}
                         </Typography>
                       </Box>
+                      
+                      {/* Priority Star Toggle with Color Indicator */}
+                      <Box
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePriorityToggle(restaurant.id);
+                        }}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          mr: 1,
+                          px: 0.5,
+                          py: 0.25,
+                          borderRadius: 1,
+                          bgcolor: restaurantPriorities[restaurant.id] === 2 ? '#ff6b6b' : restaurantPriorities[restaurant.id] === 1 ? '#ffd700' : 'transparent',
+                          border: `1px solid ${restaurantPriorities[restaurant.id] === 2 ? '#ff6b6b' : restaurantPriorities[restaurant.id] === 1 ? '#ffd700' : 'transparent'}`,
+                        }}
+                      >
+                        {renderPriorityStars(restaurantPriorities[restaurant.id] || 0)}
+                        <Typography variant="caption" sx={{ ml: 0.5, fontSize: '0.65rem', color: restaurantPriorities[restaurant.id] === 2 ? '#fff' : restaurantPriorities[restaurant.id] === 1 ? '#333' : 'text.secondary' }}>
+                          {getPriorityLabel(restaurantPriorities[restaurant.id] || 0)}
+                        </Typography>
+                      </Box>
+                      
                       {selectedRestaurantIds.includes(restaurant.id) && (
                         <TextField
                           size="small"

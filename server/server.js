@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import authRoutes from './routes/auth.js';
-import warehousesRoutes from './routes/warehouses.js';
+import warehousesRoutes from './routes/warehouses.js'; 
 import fleetsRoutes from './routes/fleets.js';
 import restaurantsRoutes from './routes/restaurants.js';
 import optimizeRoutes from './routes/optimize.js';
@@ -19,11 +19,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const allowedOrigins = [
-  'http://localhost:5173',
+  'http://localhost:5173', 
   'http://localhost:5174',
-  'http://localhost:3000',
+  'http://localhost:3001',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
+  'https://byufuel-app.vercel.app',
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 

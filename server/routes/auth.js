@@ -9,6 +9,7 @@ const router = express.Router();
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
+  'https://byufuel-app.vercel.app', 
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
@@ -72,8 +73,8 @@ router.post('/signup', async (req, res) => {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
@@ -140,8 +141,8 @@ router.post('/login', async (req, res) => {
 
     res.cookie('token', token, {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });

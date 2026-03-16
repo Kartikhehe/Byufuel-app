@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Dialog, DialogTitle, DialogContent, Button, Box, useTheme, Typography, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Dialog as ConfirmDialog } from '@mui/material';
-import { ExpandMore, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime, LocationOn, Navigation, OpenInNew, ArrowDropDownCircle, ContentCopy } from '@mui/icons-material';
+import { ExpandMore, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime, LocationOn, Navigation, OpenInNew, ArrowDropDownCircle, ContentCopy, Star as StarIcon, StarBorder as StarBorderIcon, Warning } from '@mui/icons-material';
 
 function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
   // Guard clause - must be first to ensure consistent hook order
@@ -507,8 +507,13 @@ function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
                                       </Box>
                                     )}
                                   </TableCell>
-                                  <TableCell sx={{ py: 1.25 }}>
-                                    <Typography variant="body2" fontWeight={500}>{stop.name}</Typography>
+<TableCell sx={{ py: 1.25 }}>
+                                    <Typography variant="body2" fontWeight={500}>
+                                      {stop.name}
+                                      {stop.priority === 1 && (
+                                        <StarIcon sx={{ fontSize: 14, color: '#FFD700', ml: 0.5, verticalAlign: 'middle' }} />
+                                      )}
+                                    </Typography>
                                     {stop.address && (
                                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                         {stop.address}
@@ -653,6 +658,119 @@ function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
                       </Box>
                     </Box>
                   ))}
+                </AccordionDetails>
+              </Accordion>
+            </Box>
+          )}
+
+
+          {summary.skippedRestaurants && summary.skippedRestaurants.length > 0 && (
+            <Box sx={{ mb: 2, px: 3 }}>
+              <Accordion 
+                expanded={expandedUnassigned === 'skipped'}
+                onChange={() => setExpandedUnassigned(expandedUnassigned === 'skipped' ? null : 'skipped')}
+                sx={{ 
+                  boxShadow: 'none',
+                  border: `1px solid ${theme.palette.warning.main}`,
+                  borderRadius: '12px !important',
+                  overflow: 'hidden',
+                  '&:before': { display: 'none' },
+                  '&.Mui-expanded': { margin: 0 }
+                }}
+              >
+                <AccordionSummary 
+                  expandIcon={<ExpandMore />}
+                  sx={{ 
+                    bgcolor: theme.palette.mode === 'dark' ? 'rgba(255, 152, 0, 0.08)' : '#fff8e1',
+                    minHeight: 56,
+                    '&.Mui-expanded': { minHeight: 56 }
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', pr: 1 }}>
+                    <Box sx={{ 
+                      width: 40, 
+                      height: 40, 
+                      borderRadius: 2, 
+                      bgcolor: '#ff9800', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      mr: 2
+                    }}>
+                      <Warning sx={{ color: 'white', fontSize: 22 }} />
+                    </Box>
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="subtitle1" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                        Skipped Restaurants
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Could not be serviced due to constraints
+                      </Typography>
+                    </Box>
+                    <Chip 
+                      size="small" 
+                      label={`${summary.skippedRestaurants.length}`}
+                      sx={{ 
+                        bgcolor: '#ff9800', 
+                        color: 'white',
+                        fontWeight: 700,
+                        minWidth: 32,
+                        height: 28
+                      }}
+                    />
+                  </Box>
+                </AccordionSummary>
+                
+                <AccordionDetails sx={{ p: 0 }}>
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#f5f5f5' }}>
+                          <TableCell sx={{ fontWeight: 600, py: 1.5, fontSize: '0.75rem' }}>Restaurant</TableCell>
+                          <TableCell sx={{ fontWeight: 600, py: 1.5, fontSize: '0.75rem', width: 100 }}>Priority</TableCell>
+                          <TableCell sx={{ fontWeight: 600, py: 1.5, fontSize: '0.75rem' }}>Reason</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {summary.skippedRestaurants.map((item, idx) => (
+                          <TableRow key={idx} sx={{ bgcolor: theme.palette.mode === 'dark' ? 'rgba(255, 152, 0, 0.05)' : '#fffaf0' }}>
+                            <TableCell sx={{ py: 1.25 }}>
+                              <Typography variant="body2" fontWeight={500}>{item.name}</Typography>
+                            </TableCell>
+                            <TableCell sx={{ py: 1.25 }}>
+                              {item.priority === 1 ? (
+                                <Chip 
+                                  size="small" 
+                                  icon={<StarIcon sx={{ fontSize: 14 }} />}
+                                  label="VIP"
+                                  sx={{ 
+                                    bgcolor: '#FFD700', 
+                                    color: '#333',
+                                    fontWeight: 600,
+                                    fontSize: '0.7rem'
+                                  }}
+                                />
+                              ) : (
+                                <Chip 
+                                  size="small" 
+                                  label="Regular"
+                                  sx={{ 
+                                    bgcolor: 'rgba(0,0,0,0.08)', 
+                                    color: 'text.secondary',
+                                    fontWeight: 500,
+                                    fontSize: '0.7rem'
+                                  }}
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell sx={{ py: 1.25 }}>
+                              <Typography variant="body2" color="text.secondary">{item.reason}</Typography>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 </AccordionDetails>
               </Accordion>
             </Box>
