@@ -225,18 +225,36 @@ function App() {
         return;
       }
       setStartSurveyDialogOpen(true);
+    } else if (item === 'View all Warehouses') {
+      if (!isAuthenticated) {
+        setLoginPromptOpen(true);
+        return;
+      }
+      setVisibleWarehouseIds(warehouses.map(w => String(w.id)));
+      if (warehouses[0]?.latitude && warehouses[0]?.longitude) {
+        handleNavigateToWarehouse(warehouses[0]);
+      }
     } else if (item === 'View Fleets') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
         return;
       }
       setFleetListDialogOpen(true);
-    } else if (item === 'View Restaurants' || item === 'Restaurants') {
+    } else if (item === 'Restaurants' || item === 'View Restaurants') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
         return;
       }
       setRestaurantListDialogOpen(true);
+    } else if (item === 'View all Restaurants') {
+      if (!isAuthenticated) {
+        setLoginPromptOpen(true);
+        return;
+      }
+      setVisibleRestaurantIds(restaurants.map(r => String(r.id)));
+      if (restaurants[0]?.latitude && restaurants[0]?.longitude) {
+        handleNavigateToRestaurantLocation(restaurants[0]);
+      }
     } else if (item === 'Optimize Route') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
@@ -244,7 +262,7 @@ function App() {
       }
       setOptimizeRouteDialogOpen(true);
     }
-    
+
     if (isMobile) {
       setSidebarOpen(false);
     }
@@ -312,6 +330,13 @@ function App() {
       longitude: restaurant.longitude || '',
       created_at: restaurant.created_at
     });
+
+    // When selecting from sidebar/dialog, show only this restaurant marker
+    setVisibleRestaurantIds((prev) => {
+      const idStr = String(restaurant.id);
+      return prev.includes(idStr) ? prev : [idStr];
+    });
+
     setRestaurantListDialogOpen(false);
     setRestaurantDetailsOpen(true);
   };
@@ -1059,32 +1084,90 @@ function App() {
   // Handle warehouse selection from dialog
   const handleWarehouseSelect = (warehouse) => {
     setActiveProject({ id: warehouse.id, name: warehouse.name });
+
+    // When selecting from sidebar/dialog, show only this warehouse marker
+    setVisibleWarehouseIds((prev) => {
+      const idStr = String(warehouse.id);
+      return prev.includes(idStr) ? prev : [idStr];
+    });
+
     // Navigate to warehouse
     if (warehouse.latitude && warehouse.longitude) {
       handleNavigateToWarehouse(warehouse);
     }
-    // Add marker if not exists
-    if (!warehouseMarkers[warehouse.id]) {
-      addWarehouseMarker(warehouse);
-    }
+
     showSnackbar(`Selected: ${warehouse.name}`, 'info');
   };
 
-  // Load warehouses and restaurants when auth state changes
+  const [visibleWarehouseIds, setVisibleWarehouseIds] = useState([]);
+  const [visibleRestaurantIds, setVisibleRestaurantIds] = useState([]);
+
+  const syncWarehouseMarkers = (ids) => {
+    // remove
+    Object.entries(warehouseMarkers).forEach(([id, marker]) => {
+      if (!ids.includes(id)) {
+        marker.remove();
+        setWarehouseMarkers(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    });
+    // add
+    ids.forEach((id) => {
+      const w = warehouses.find(x => String(x.id) === String(id));
+      if (w) addWarehouseMarker(w);
+    });
+  };
+
+  const syncRestaurantMarkers = (ids) => {
+    Object.entries(restaurantMarkers).forEach(([id, marker]) => {
+      if (!ids.includes(id)) {
+        marker.remove();
+        setRestaurantMarkers(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    });
+    ids.forEach((id) => {
+      const r = restaurants.find(x => String(x.id) === String(id));
+      if (r) addRestaurantMarker(r);
+    });
+  };
+
+  // Load data when auth state changes (do NOT render all markers by default)
   useEffect(() => {
     if (isAuthenticated) {
       loadWarehouses();
       loadRestaurants();
+      setVisibleWarehouseIds([]);
+      setVisibleRestaurantIds([]);
+      // markers will remain empty until user selects
     } else {
-      // Clear markers when logged out
       Object.values(warehouseMarkers).forEach(marker => marker.remove());
       setWarehouseMarkers({});
       setWarehouses([]);
       Object.values(restaurantMarkers).forEach(marker => marker.remove());
       setRestaurantMarkers({});
       setRestaurants([]);
+      setVisibleWarehouseIds([]);
+      setVisibleRestaurantIds([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    syncWarehouseMarkers(visibleWarehouseIds.map(String));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleWarehouseIds, warehouses]);
+
+  useEffect(() => {
+    syncRestaurantMarkers(visibleRestaurantIds.map(String));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleRestaurantIds, restaurants]);
 
   // Cleanup map click handler on unmount
   useEffect(() => {

@@ -62,7 +62,6 @@ router.post('/route', async (req, res) => {
       allFleets = fleetResult.rows.map(f => ({
         id: f.id,
         name: f.vehicle,
-        // Use capacity from database, or calculate based on vehicle type
         capacity: f.capacity || getDefaultCapacity(f.vehicle, f.vehicle_type),
         availableCount: f.available,
         totalCount: f.count,
@@ -85,12 +84,28 @@ router.post('/route', async (req, res) => {
       warehouseMap.set(wh.id, index);
     });
 
-    // Add restaurants
+    // Add restaurants and parse constraints
     const restaurantCoords = [];
     restaurants.forEach((r, index) => {
       coords.push([parseFloat(r.longitude), parseFloat(r.latitude)]);
+      
+      // Parse time window to seconds relative to 8:00 AM (0 seconds)
+      let parsedTimeWindow = null;
+      if (r.timeWindow && r.timeWindow.start && r.timeWindow.end) {
+        const parseTime = (t) => {
+          const [h, m] = t.split(':').map(Number);
+          return ((h - 8) * 3600) + (m * 60);
+        };
+        parsedTimeWindow = {
+          start: parseTime(r.timeWindow.start),
+          end: parseTime(r.timeWindow.end)
+        };
+      }
+
       restaurantCoords.push({
         index: coords.length - 1,
+        priorityLevel: parseInt(r.priorityLevel) || 1, // Default to 1 (Normal)
+        parsedTimeWindow: parsedTimeWindow,
         ...r
       });
     });
@@ -182,7 +197,7 @@ router.post('/route', async (req, res) => {
       demands,
       numWarehouses,
       warehouses,
-      restaurants
+      restaurantCoords
     );
 
     res.json({
@@ -220,23 +235,10 @@ function getDefaultCapacity(vehicleName, vehicleType) {
   const name = vehicleName.toLowerCase();
   const type = vehicleType?.toLowerCase() || '';
   
-  // 2 Wheeler - small capacity
-  if (type.includes('2 wheeler') || name.includes('moped')) {
-    return 50; // 50 liters
-  }
-  
-  // Small 4 Wheeler
-  if (name.includes('intra') || name.includes('maxima')) {
-    return 300; // 300 liters
-  }
-  
-  // Large 4 Wheeler
-  if (name.includes('bolero') || type.includes('4 wheeler')) {
-    return 500; // 500 liters
-  }
-  
-  // Default capacity
-  return 200; // 200 liters
+  if (type.includes('2 wheeler') || name.includes('moped')) return 50; 
+  if (name.includes('intra') || name.includes('maxima')) return 300;
+  if (name.includes('bolero') || type.includes('4 wheeler')) return 500;
+  return 200; 
 }
 
 // Create Haversine distance matrix (fallback)
@@ -271,7 +273,7 @@ function createHaversineMatrix(coords, asDuration = false) {
 }
 
 // Solve VRP (simplified implementation for Node.js)
-function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, numWarehouses, warehouses, restaurants) {
+function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, numWarehouses, warehouses, restaurantCoords) {
   console.log('=== Starting VRP Solver ===');
   console.log('Total locations:', coords.length);
   console.log('Warehouses:', numWarehouses);
@@ -312,8 +314,9 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
     let currentLoad = 0;
     let currentLocation = vehicle.start;
     let cumulativeTime = 0; // Time in seconds from start (8:00 AM)
+    let assignedCount = 0;
 
-    // Add departure time from warehouse
+    // Add departure time from warehouse (EXACTLY ONCE)
     route.stops.push({
       index: vehicle.start,
       type: 'warehouse',
@@ -323,65 +326,142 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
       load: 0
     });
 
-    // Assign restaurants to this vehicle
-    const assignedRestaurants = [];
-    
-    // Sort unassigned restaurants by distance from warehouse
-    const sortedRestaurants = Array.from(unassigned).sort((a, b) => {
-      const distA = distanceMatrix[vehicle.start][a];
-      const distB = distanceMatrix[vehicle.start][b];
-      return distA - distB;
-    });
+    while (unassigned.size > 0) {
+      let bestStop = null;
+      let bestArrivalTime = 0;
+      let bestWaitTime = 0;
 
-    console.log(`  Vehicle ${vehicle.name}: ${sortedRestaurants.length} unassigned restaurants to consider`);
+      // --- PHASE 1: "Immediate Supreme" Override ---
+      let immediateSupremeStop = null;
+      let immediateSupremeScore = Infinity;
 
-    // Greedy nearest neighbor with capacity constraint
-    for (const restaurantIdx of sortedRestaurants) {
-      const demand = demands[restaurantIdx];
-      const distanceTo = distanceMatrix[currentLocation][restaurantIdx];
-      const timeTo = durationMatrix[currentLocation][restaurantIdx];
-      const returnDistance = distanceMatrix[restaurantIdx][vehicle.end];
-      const returnTime = durationMatrix[restaurantIdx][vehicle.end];
-
-      // Check if adding this restaurant is feasible
-      if (currentLoad + demand <= vehicle.capacity) {
-        // Check if we can return to depot (12 hour window = 43200 seconds)
-        const projectedLoad = currentLoad + demand;
-        const totalTripTime = cumulativeTime + timeTo + 900; // Add 15 min service time
-
-        // Simple constraint: don't exceed reasonable distance and time
-        if (totalTripTime < 43200) {
-          currentLoad += demand;
-          totalLoad += demand;
-          cumulativeTime = totalTripTime; // Add service time
-          
-          route.load = currentLoad;
-          route.stops.push({
-            index: restaurantIdx,
-            type: 'restaurant',
-            name: restaurants[restaurantIdx - numWarehouses]?.name || `Restaurant ${restaurantIdx - numWarehouses + 1}`,
-            address: restaurants[restaurantIdx - numWarehouses]?.address || '',
-            arrivalTime: formatTime(cumulativeTime),
-            cumulativeSeconds: cumulativeTime,
-            load: currentLoad
-          });
-          
-          route.distance += distanceTo;
-          currentLocation = restaurantIdx;
-          unassigned.delete(restaurantIdx);
-          assignedRestaurants.push(restaurantIdx);
-        } else {
-          console.log(`  Skipped ${restaurants[restaurantIdx - numWarehouses]?.name}: would exceed time limit`);
+      for (const idx of unassigned) {
+        const rData = restaurantCoords[idx - numWarehouses];
+        if (rData.priorityLevel === 3 && !rData.parsedTimeWindow) {
+          const demand = demands[idx];
+          if (currentLoad + demand <= vehicle.capacity) {
+            const timeTo = durationMatrix[currentLocation][idx];
+            const returnTime = durationMatrix[idx][vehicle.end];
+            if (cumulativeTime + timeTo + 900 + returnTime <= 43200) {
+              if (timeTo < immediateSupremeScore) {
+                immediateSupremeScore = timeTo;
+                immediateSupremeStop = idx;
+              }
+            }
+          }
         }
-      } else {
-        console.log(`  Skipped ${restaurants[restaurantIdx - numWarehouses]?.name}: demand ${demand} > remaining capacity ${vehicle.capacity - currentLoad}`);
       }
+
+      if (immediateSupremeStop !== null) {
+        bestStop = immediateSupremeStop;
+        bestArrivalTime = cumulativeTime + immediateSupremeScore;
+        bestWaitTime = 0;
+      } else {
+        // --- PHASE 2: Find the "Priority Anchor" ---
+        let anchor = null;
+        let anchorScore = Infinity;
+
+        for (let tier = 3; tier >= 2; tier--) {
+          for (const idx of unassigned) {
+            const rData = restaurantCoords[idx - numWarehouses];
+            if (rData.priorityLevel !== tier || !rData.parsedTimeWindow) continue;
+            
+            const demand = demands[idx];
+            if (currentLoad + demand > vehicle.capacity) continue;
+            
+            const tw = rData.parsedTimeWindow;
+            const timeTo = durationMatrix[currentLocation][idx];
+            let arrival = cumulativeTime + timeTo;
+            
+            if (arrival > tw.end) continue; 
+            
+            let wait = arrival < tw.start ? tw.start - arrival : 0;
+            let score = timeTo + wait; 
+            
+            if (score < anchorScore) {
+              anchorScore = score;
+              anchor = { idx, demand, tw, arrival, wait };
+            }
+          }
+          if (anchor) break; 
+        }
+
+        // --- PHASE 3: Smart Interleaving & Nearest Neighbor ---
+        let bestScore = Infinity;
+
+        for (const idx of unassigned) {
+          const rData = restaurantCoords[idx - numWarehouses];
+          const demand = demands[idx];
+          const priority = rData.priorityLevel || 1;
+
+          if (currentLoad + demand > vehicle.capacity) continue;
+
+          const timeTo = durationMatrix[currentLocation][idx];
+          let arrival = cumulativeTime + timeTo;
+          let wait = 0;
+          const tw = rData.parsedTimeWindow;
+
+          if (tw) {
+            if (arrival > tw.end) continue;
+            if (arrival < tw.start) {
+              wait = tw.start - arrival;
+              arrival = tw.start;
+            }
+          }
+
+          if (anchor && anchor.idx !== idx) {
+            if (currentLoad + demand + anchor.demand > vehicle.capacity) continue;
+            const timeToAnchor = durationMatrix[idx][anchor.idx];
+            const arrivalAtAnchor = arrival + 900 + timeToAnchor; 
+            if (arrivalAtAnchor > anchor.tw.end) continue; 
+          }
+
+          const returnTime = durationMatrix[idx][vehicle.end];
+          if (arrival + 900 + returnTime > 43200) continue;
+
+          let tierMultiplier = priority === 3 ? 0.1 : (priority === 2 ? 0.4 : 1.0);
+          let score = (timeTo + (wait * 1.5)) * tierMultiplier;
+
+          if (score < bestScore) {
+            bestScore = score;
+            bestStop = idx;
+            bestArrivalTime = arrival;
+            bestWaitTime = wait;
+          }
+        }
+      }
+
+      // --- EXECUTE STOP ---
+      if (bestStop === null) break; 
+      
+      currentLoad += demands[bestStop];
+      totalLoad += demands[bestStop];
+      cumulativeTime = bestArrivalTime + 900; 
+
+      route.load = currentLoad;
+      route.distance += distanceMatrix[currentLocation][bestStop];
+      
+      route.stops.push({
+        index: bestStop,
+        type: 'restaurant',
+        name: restaurantCoords[bestStop - numWarehouses]?.name || `Restaurant ${bestStop - numWarehouses + 1}`,
+        address: restaurantCoords[bestStop - numWarehouses]?.address || '',
+        arrivalTime: formatTime(bestArrivalTime),
+        cumulativeSeconds: cumulativeTime,
+        load: currentLoad,
+        waited: bestWaitTime > 0 ? `${Math.round(bestWaitTime/60)}m` : '0m',
+        priorityLevel: restaurantCoords[bestStop - numWarehouses]?.priorityLevel
+      });
+
+      currentLocation = bestStop;
+      unassigned.delete(bestStop);
+      assignedCount++; // Tracking for the logs
     }
 
-    console.log(`  Vehicle ${vehicle.name}: assigned ${assignedRestaurants.length} restaurants`);
+    console.log(`  Vehicle ${vehicle.name}: assigned ${assignedCount} restaurants`);
 
     // Return to depot - ONLY if we have assigned restaurants
-    if (route.stops.length > 1) { // More than just the departure warehouse
+    if (route.stops.length > 1) { 
       const returnDist = distanceMatrix[currentLocation][vehicle.end];
       const returnTime = durationMatrix[currentLocation][vehicle.end];
       route.distance += returnDist;
@@ -408,7 +488,6 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
 
   // Track all vehicles that got no assignments (empty routes)
   const emptyVehicles = sortedFleet.filter(vehicle => {
-    // Check if this vehicle got any routes
     return !routes.some(r => r.vehicleName === vehicle.name);
   });
 
@@ -446,8 +525,8 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
       stops: remainingRestaurants.map(idx => ({
         index: idx,
         type: 'restaurant',
-        name: restaurants[idx - numWarehouses]?.name || `Restaurant ${idx - numWarehouses + 1}`,
-        address: restaurants[idx - numWarehouses]?.address || '',
+        name: restaurantCoords[idx - numWarehouses]?.name || `Restaurant ${idx - numWarehouses + 1}`,
+        address: restaurantCoords[idx - numWarehouses]?.address || '',
         arrivalTime: null,
         cumulativeSeconds: null,
         load: demands[idx]
@@ -491,4 +570,3 @@ function formatTime(seconds) {
 }
 
 export default router;
-

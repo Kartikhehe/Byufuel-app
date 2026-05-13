@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Dialog, DialogTitle, DialogContent, Button, TextField, List, ListItem, Box, useTheme, CircularProgress, Typography, InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText, IconButton, Checkbox, Stepper, Step, StepLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
-import { Folder as FolderIcon, Search, Sort, SwapVertRounded, ArrowBack, ArrowForward, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon } from '@mui/icons-material';
+import { Dialog, DialogTitle, DialogContent, Button, TextField, List, ListItem, Box, useTheme, CircularProgress, Typography, InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText, IconButton, Checkbox, Stepper, Step, StepLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Select } from '@mui/material';
+import { Folder as FolderIcon, Search, Sort, SwapVertRounded, ArrowBack, ArrowForward, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime } from '@mui/icons-material';
+
 import { warehousesAPI, fleetsAPI, restaurantsAPI, optimizeAPI } from '../services/api';
 
 function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
@@ -23,7 +24,9 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
   const [restaurants, setRestaurants] = useState([]);
   const [selectedRestaurantIds, setSelectedRestaurantIds] = useState([]);
   const [restaurantsLoading, setRestaurantsLoading] = useState(false);
-  const [restaurantAmounts, setRestaurantAmounts] = useState({});
+const [restaurantAmounts, setRestaurantAmounts] = useState({});
+  const [restaurantPriorities, setRestaurantPriorities] = useState({});
+  const [restaurantTimeWindows, setRestaurantTimeWindows] = useState({});
 
   // Search and Sort
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,6 +240,16 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
           delete nextAmounts[restaurantId];
           return nextAmounts;
         });
+        setRestaurantPriorities(prev => {
+          const next = { ...prev };
+          delete next[restaurantId];
+          return next;
+        });
+        setRestaurantTimeWindows(prev => {
+          const next = { ...prev };
+          delete next[restaurantId];
+          return next;
+        });
         return next;
       } else {
         return [...prev, restaurantId];
@@ -244,12 +257,45 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
     });
   };
 
-  // Handle amount change for restaurant
+// Handle amount change for restaurant
   const handleRestaurantAmountChange = (restaurantId, value) => {
     setRestaurantAmounts(prev => ({
       ...prev,
       [restaurantId]: value
     }));
+  };
+
+  const [timeWindowAnchor, setTimeWindowAnchor] = useState({ open: false, restaurantId: null });
+
+  const handleTimeWindowChange = (restaurantId, field, value) => {
+    setRestaurantTimeWindows(prev => ({
+      ...prev,
+      [restaurantId]: {
+        ...prev[restaurantId],
+        [field]: value
+      }
+    }));
+  };
+
+  // Snap to quarter hour
+  const snapToQuarter = (timeStr) => {
+    const match = timeStr.match(/(\d+):(\d+)/);
+    if (!match) return timeStr;
+    let [, hour, min] = match;
+    hour = parseInt(hour);
+    min = parseInt(min);
+    min = Math.round(min / 15) * 15;
+    if (min === 60) {
+      min = 0;
+      hour = (hour + 1) % 24;
+    }
+    if (hour < 8) hour = 8;
+    if (hour > 17) hour = 17;
+    return `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+  };
+
+  const closeTimeWindowPopup = () => {
+    setTimeWindowAnchor({ open: false, restaurantId: null });
   };
 
   // Format address for display
@@ -306,16 +352,18 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
             availableCount: fleetAvailabilities[fleet.id] !== undefined ? fleetAvailabilities[fleet.id] : fleet.available
           }))
         })),
-        restaurants: restaurants
-          .filter(r => selectedRestaurantIds.includes(r.id))
-          .map(r => ({
-            id: r.id,
-            name: r.outlet_name,
-            address: formatAddress(r.area, 30) + (r.city ? `, ${r.city}` : ''),
-            amount: restaurantAmounts[r.id] || '',
-            latitude: r.latitude,
-            longitude: r.longitude
-          }))
+            restaurants: restaurants
+              .filter(r => selectedRestaurantIds.includes(r.id))
+              .map(r => ({
+                id: r.id,
+                name: r.outlet_name,
+                address: formatAddress(r.area, 30) + (r.city ? `, ${r.city}` : ''),
+                amount: restaurantAmounts[r.id] || '',
+                priorityLevel: restaurantPriorities[r.id] || 1,
+                timeWindow: restaurantTimeWindows[r.id] || undefined,
+                latitude: r.latitude,
+                longitude: r.longitude
+              }))
       };
 
       // Call backend API for route optimization
@@ -697,19 +745,47 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
                           {formatAddress((restaurant.area || '') + (restaurant.city ? `, ${restaurant.city}` : ''), 40)}
                         </Typography>
                       </Box>
-                      {selectedRestaurantIds.includes(restaurant.id) && (
-                        <TextField
-                          size="small"
-                          placeholder="Amount (L)"
-                          value={restaurantAmounts[restaurant.id] || ''}
-                          onChange={(e) => handleRestaurantAmountChange(restaurant.id, e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          type="number"
-                          sx={{ width: 120 }}
-                          InputProps={{
-                            endAdornment: <Typography sx={{ ml: 0.5 }}>L</Typography>
-                          }}
-                        />
+{selectedRestaurantIds.includes(restaurant.id) && (
+                        <>
+                          <TextField
+                            size="small"
+                            placeholder="Amount (L)"
+                            value={restaurantAmounts[restaurant.id] || ''}
+                            onChange={(e) => handleRestaurantAmountChange(restaurant.id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            type="number"
+                            sx={{ width: 100, mr: 1 }}
+                            InputProps={{
+                              endAdornment: <Typography sx={{ ml: 0.5 }}>L</Typography>
+                            }}
+                          />
+                          <Select
+                            size="small"
+                            value={restaurantPriorities[restaurant.id] || 1}
+                            onChange={(e) => setRestaurantPriorities(prev => ({ ...prev, [restaurant.id]: parseInt(e.target.value) }))}
+                            onClick={(e) => e.stopPropagation()}
+                            sx={{ width: 90, mr: 1 }}
+                          >
+                            <MenuItem value={1}>Normal</MenuItem>
+                            <MenuItem value={2}>High</MenuItem>
+                            <MenuItem value={3}>Supreme</MenuItem>
+                          </Select>
+<IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTimeWindowAnchor({ open: true, restaurantId: restaurant.id });
+                            }}
+                            sx={{ mr: 1 }}
+                          >
+                            <AccessTime />
+                          </IconButton>
+                          {restaurantTimeWindows[restaurant.id] && (
+                            <Typography variant="caption" sx={{ mr: 1 }}>
+                              {restaurantTimeWindows[restaurant.id].start}-{restaurantTimeWindows[restaurant.id].end}
+                            </Typography>
+                          )}
+                        </>
                       )}
                     </Box>
                   </ListItem>
@@ -745,6 +821,37 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
               </Button>
             </Box>
           </DialogContent>
+
+          {/* Time Window Popup */}
+          <Dialog
+            open={timeWindowAnchor.open}
+            onClose={closeTimeWindowPopup}
+            maxWidth="xs"
+          >
+            <DialogTitle>Set Time Window</DialogTitle>
+            <DialogContent>
+              <TextField
+                label="Start Time (HH:MM)"
+                fullWidth
+                value={restaurantTimeWindows[timeWindowAnchor.restaurantId]?.start || ''}
+                onChange={(e) => handleTimeWindowChange(timeWindowAnchor.restaurantId, 'start', snapToQuarter(e.target.value))}
+                sx={{ mb: 2 }}
+              />
+              <TextField
+                label="End Time (HH:MM)"
+                fullWidth
+                value={restaurantTimeWindows[timeWindowAnchor.restaurantId]?.end || ''}
+                onChange={(e) => handleTimeWindowChange(timeWindowAnchor.restaurantId, 'end', snapToQuarter(e.target.value))}
+              />
+              <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+                Minutes snap to quarters (00/15/30/45), 8AM-5PM
+              </Typography>
+            </DialogContent>
+            <Box sx={{ p: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+              <Button onClick={closeTimeWindowPopup}>Cancel</Button>
+              <Button variant="contained" onClick={closeTimeWindowPopup}>OK</Button>
+            </Box>
+          </Dialog>
         </>
       )}
     </Dialog>
