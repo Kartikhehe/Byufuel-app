@@ -220,6 +220,128 @@ router.post('/route', async (req, res) => {
   }
 });
 
+// Add this below your existing router.post('/route', ...)
+
+// Dynamic Reroute Endpoint
+router.post('/dynamic-reroute', async (req, res) => {
+  try {
+    const { activeVehicles, unservedRestaurants, newPickup, warehouses, currentTimeSeconds } = req.body;
+
+    console.log('=== Dynamic Reroute Request ===');
+
+    const currentTime = parseInt(currentTimeSeconds) || 0; // start offset seconds
+
+    // 1. Build Coordinates Array
+    const coords = [];
+    
+    // Add vehicle current locations first (These act as the new "Start Depots")
+    activeVehicles.forEach(v => coords.push([parseFloat(v.lng), parseFloat(v.lat)]));
+    const vehicleOffset = coords.length;
+
+    // Add warehouses (for the vehicles to return to at the end)
+    warehouses.forEach(wh => coords.push([parseFloat(wh.longitude), parseFloat(wh.latitude)]));
+    
+    // Add unserved and new restaurants
+    const combinedRestaurants = [...unservedRestaurants];
+    if (newPickup) combinedRestaurants.push(newPickup);
+    
+    const restaurantCoords = [];
+    combinedRestaurants.forEach((r, index) => {
+      coords.push([parseFloat(r.longitude), parseFloat(r.latitude)]);
+      restaurantCoords.push({
+        index: coords.length - 1,
+        priorityLevel: parseInt(r.priorityLevel) || (r.isNewUrgent ? 3 : 1), // Urgent pickups get Supreme priority
+        parsedTimeWindow: r.parsedTimeWindow || null,
+        name: r.name || r.outlet_name || `Restaurant ${index + 1}`, // <--- ADDED HERE
+        address: r.address || r.area || '', // <--- ADDED HERE
+        ...r
+      });
+    });
+
+    // 2. Fetch ORS Matrix for the new current state...
+
+    // 2. Fetch ORS Matrix for the new current state
+    const ORS_API_KEY = process.env.ORS_API_KEY || 'your-ors-api-key';
+    let distanceMatrix, durationMatrix;
+    try {
+      const orsResponse = await axios.post('https://api.openrouteservice.org/v2/matrix/driving-car', {
+        locations: coords,
+        metrics: ['distance', 'duration']
+      }, {
+        headers: { 'Authorization': ORS_API_KEY, 'Content-Type': 'application/json' }
+      });
+      distanceMatrix = orsResponse.data.distances;
+      durationMatrix = orsResponse.data.durations;
+    } catch (error) {
+      console.warn('ORS failed, using Haversine fallback for reroute');
+      distanceMatrix = createHaversineMatrix(coords);
+      durationMatrix = createHaversineMatrix(coords, true);
+    }
+
+    // 3. Configure Fleet Data for the remaining journey
+    const fleetData = activeVehicles.map((v, idx) => ({
+      name: v.name,
+      capacity: v.totalCapacity - v.currentLoad, // Only use remaining capacity
+      start: idx, // Start at their current GPS coordinate index
+      end: vehicleOffset + warehouses.findIndex(wh => wh.id === v.warehouseId), // End at their original warehouse
+      costFactor: getVehicleCostFactor(v.name),
+      startTime: currentTime
+    }));
+
+    // 4. Build Demands Array
+    const demands = new Array(vehicleOffset + warehouses.length).fill(0); // Vehicles and warehouses have 0 demand
+    combinedRestaurants.forEach(r => demands.push(parseFloat(r.amount) || 0));
+
+    // 5. Run the existing solver
+    const solution = solveVRP(
+      coords,
+      distanceMatrix,
+      durationMatrix,
+      fleetData,
+      demands,
+      vehicleOffset + warehouses.length, // Treat vehicles + warehouses as "depots"
+      [...activeVehicles.map(v => ({ name: 'Current Location' })), ...warehouses],
+      restaurantCoords
+    );
+
+
+    // FIX: Properly format the waypoints array with index, name, and type!
+    res.json({
+      success: true,
+      routes: solution.routes,
+      summary: solution.summary,
+      waypoints: coords.map((c, i) => {
+        let wpName = 'Unknown';
+        let wpType = 'unknown';
+
+        if (i < vehicleOffset) {
+          wpName = 'Current GPS Location';
+          wpType = 'warehouse';
+        } else if (i < vehicleOffset + warehouses.length) {
+          wpName = warehouses[i - vehicleOffset]?.name || 'Warehouse';
+          wpType = 'warehouse';
+        } else {
+          const rData = combinedRestaurants[i - (vehicleOffset + warehouses.length)];
+          wpName = rData?.name || rData?.outlet_name || `Restaurant ${i - (vehicleOffset + warehouses.length) + 1}`;
+          wpType = 'restaurant';
+        }
+
+        return {
+          index: i,
+          longitude: c[0],
+          latitude: c[1],
+          type: wpType,
+          name: wpName
+        };
+      })
+    });
+
+  } catch (error) {
+    console.error('Dynamic Reroute Error:', error);
+    res.status(500).json({ error: 'Failed to reroute: ' + error.message });
+  }
+});
+
 // Helper function to determine vehicle cost factor
 function getVehicleCostFactor(vehicleName) {
   const name = vehicleName.toLowerCase();
@@ -273,281 +395,185 @@ function createHaversineMatrix(coords, asDuration = false) {
 }
 
 // Solve VRP (simplified implementation for Node.js)
+// Solve VRP (Parallel Concurrent Implementation for Node.js)
 function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, numWarehouses, warehouses, restaurantCoords) {
-  console.log('=== Starting VRP Solver ===');
-  console.log('Total locations:', coords.length);
-  console.log('Warehouses:', numWarehouses);
-  console.log('Restaurants:', coords.length - numWarehouses);
-  console.log('Fleet size:', fleetData.length);
-  console.log('Demands:', demands);
+  console.log('=== Starting Parallel VRP Solver ===');
   
   const n = coords.length;
-  const routes = [];
-  let totalDistance = 0;
-  let totalLoad = 0;
-  let totalCost = 0;
-
-  // Sort fleet by capacity (smallest first for efficiency)
-  const sortedFleet = [...fleetData].sort((a, b) => a.capacity - b.capacity);
-
-  // Track unassigned restaurants
   const unassigned = new Set();
   for (let i = numWarehouses; i < n; i++) {
     unassigned.add(i);
   }
-  console.log('Initial unassigned count:', unassigned.size);
 
-  // Greedy assignment for each vehicle
-  sortedFleet.forEach((vehicle, vehicleIdx) => {
-    console.log(`Processing vehicle ${vehicleIdx + 1}/${sortedFleet.length}: ${vehicle.name} (capacity: ${vehicle.capacity})`);
-    
-    const route = {
-      vehicleName: vehicle.name,
-      warehouse: vehicle.start,
-      warehouseName: warehouses[vehicle.start]?.name || 'Unknown Warehouse',
-      stops: [],
+  // 1. Initialize all vehicles concurrently
+  const vStates = fleetData.map(v => ({
+    ...v,
+    currentLocation: v.start,
+    currentLoad: 0,
+    cumulativeTime: v.startTime || 0,
+    route: {
+      vehicleName: v.name,
+      warehouse: v.start,
+      warehouseName: warehouses[v.start]?.name || 'Unknown Warehouse',
+      stops: [{
+        index: v.start,
+        type: 'warehouse',
+        name: v.startTime ? 'Current GPS Location' : (warehouses[v.start]?.name || 'Warehouse'),
+        arrivalTime: formatTime(v.startTime || 0),
+        cumulativeSeconds: v.startTime || 0,
+        load: 0
+      }],
       distance: 0,
       load: 0,
       cost: 0
-    };
+    }
+  }));
 
-    let currentLoad = 0;
-    let currentLocation = vehicle.start;
-    let cumulativeTime = 0; // Time in seconds from start (8:00 AM)
-    let assignedCount = 0;
+  let progress = true;
 
-    // Add departure time from warehouse (EXACTLY ONCE)
-    route.stops.push({
-      index: vehicle.start,
-      type: 'warehouse',
-      name: warehouses[vehicle.start]?.name || 'Warehouse',
-      arrivalTime: formatTime(0), // 8:00 AM
-      cumulativeSeconds: 0,
-      load: 0
-    });
+  // 2. Parallel Greedy Assignment
+  // Every vehicle competes for the absolute best next stop globally
+  while (unassigned.size > 0 && progress) {
+    progress = false;
 
-    while (unassigned.size > 0) {
-      let bestStop = null;
-      let bestArrivalTime = 0;
-      let bestWaitTime = 0;
+    let bestVehicleIdx = -1;
+    let bestStop = null;
+    let bestScore = Infinity;
+    let bestArrivalTime = 0;
+    let bestWaitTime = 0;
 
-      // --- PHASE 1: "Immediate Supreme" Override ---
-      let immediateSupremeStop = null;
-      let immediateSupremeScore = Infinity;
+    for (let vIdx = 0; vIdx < vStates.length; vIdx++) {
+      const vState = vStates[vIdx];
 
       for (const idx of unassigned) {
         const rData = restaurantCoords[idx - numWarehouses];
-        if (rData.priorityLevel === 3 && !rData.parsedTimeWindow) {
-          const demand = demands[idx];
-          if (currentLoad + demand <= vehicle.capacity) {
-            const timeTo = durationMatrix[currentLocation][idx];
-            const returnTime = durationMatrix[idx][vehicle.end];
-            if (cumulativeTime + timeTo + 900 + returnTime <= 43200) {
-              if (timeTo < immediateSupremeScore) {
-                immediateSupremeScore = timeTo;
-                immediateSupremeStop = idx;
-              }
-            }
+        const demand = demands[idx];
+        const priority = rData.priorityLevel || 1;
+
+        if (vState.currentLoad + demand > vState.capacity) continue;
+
+        const timeTo = durationMatrix[vState.currentLocation][idx];
+        let arrival = vState.cumulativeTime + timeTo;
+        let wait = 0;
+
+        const tw = rData.parsedTimeWindow;
+        if (tw) {
+          if (arrival > tw.end) continue;
+          if (arrival < tw.start) {
+            wait = tw.start - arrival;
+            arrival = tw.start;
           }
+        }
+
+        const returnTime = durationMatrix[idx][vState.end];
+        if (arrival + 900 + returnTime > 43200) continue; // 12-hour constraint
+
+        // Tier multipliers: Supreme (3) is heavily favored
+        let tierMultiplier = priority === 3 ? 0.01 : (priority === 2 ? 0.3 : 1.0);
+        
+        // The score factors in the vehicle's specific cost! (Prefers cheaper vehicles for close stops)
+        let score = (timeTo + (wait * 1.5)) * tierMultiplier * vState.costFactor;
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestStop = idx;
+          bestVehicleIdx = vIdx;
+          bestArrivalTime = arrival;
+          bestWaitTime = wait;
         }
       }
+    }
 
-      if (immediateSupremeStop !== null) {
-        bestStop = immediateSupremeStop;
-        bestArrivalTime = cumulativeTime + immediateSupremeScore;
-        bestWaitTime = 0;
-      } else {
-        // --- PHASE 2: Find the "Priority Anchor" ---
-        let anchor = null;
-        let anchorScore = Infinity;
-
-        for (let tier = 3; tier >= 2; tier--) {
-          for (const idx of unassigned) {
-            const rData = restaurantCoords[idx - numWarehouses];
-            if (rData.priorityLevel !== tier || !rData.parsedTimeWindow) continue;
-            
-            const demand = demands[idx];
-            if (currentLoad + demand > vehicle.capacity) continue;
-            
-            const tw = rData.parsedTimeWindow;
-            const timeTo = durationMatrix[currentLocation][idx];
-            let arrival = cumulativeTime + timeTo;
-            
-            if (arrival > tw.end) continue; 
-            
-            let wait = arrival < tw.start ? tw.start - arrival : 0;
-            let score = timeTo + wait; 
-            
-            if (score < anchorScore) {
-              anchorScore = score;
-              anchor = { idx, demand, tw, arrival, wait };
-            }
-          }
-          if (anchor) break; 
-        }
-
-        // --- PHASE 3: Smart Interleaving & Nearest Neighbor ---
-        let bestScore = Infinity;
-
-        for (const idx of unassigned) {
-          const rData = restaurantCoords[idx - numWarehouses];
-          const demand = demands[idx];
-          const priority = rData.priorityLevel || 1;
-
-          if (currentLoad + demand > vehicle.capacity) continue;
-
-          const timeTo = durationMatrix[currentLocation][idx];
-          let arrival = cumulativeTime + timeTo;
-          let wait = 0;
-          const tw = rData.parsedTimeWindow;
-
-          if (tw) {
-            if (arrival > tw.end) continue;
-            if (arrival < tw.start) {
-              wait = tw.start - arrival;
-              arrival = tw.start;
-            }
-          }
-
-          if (anchor && anchor.idx !== idx) {
-            if (currentLoad + demand + anchor.demand > vehicle.capacity) continue;
-            const timeToAnchor = durationMatrix[idx][anchor.idx];
-            const arrivalAtAnchor = arrival + 900 + timeToAnchor; 
-            if (arrivalAtAnchor > anchor.tw.end) continue; 
-          }
-
-          const returnTime = durationMatrix[idx][vehicle.end];
-          if (arrival + 900 + returnTime > 43200) continue;
-
-          let tierMultiplier = priority === 3 ? 0.1 : (priority === 2 ? 0.4 : 1.0);
-          let score = (timeTo + (wait * 1.5)) * tierMultiplier;
-
-          if (score < bestScore) {
-            bestScore = score;
-            bestStop = idx;
-            bestArrivalTime = arrival;
-            bestWaitTime = wait;
-          }
-        }
-      }
-
-      // --- EXECUTE STOP ---
-      if (bestStop === null) break; 
+    // 3. Execute the absolute best move
+    if (bestStop !== null) {
+      const vState = vStates[bestVehicleIdx];
       
-      currentLoad += demands[bestStop];
-      totalLoad += demands[bestStop];
-      cumulativeTime = bestArrivalTime + 900; 
-
-      route.load = currentLoad;
-      route.distance += distanceMatrix[currentLocation][bestStop];
+      vState.currentLoad += demands[bestStop];
+      vState.cumulativeTime = bestArrivalTime + 900; // Adds the 15-minute service time
       
-      route.stops.push({
+      vState.route.load = vState.currentLoad;
+      vState.route.distance += distanceMatrix[vState.currentLocation][bestStop];
+      
+      vState.route.stops.push({
         index: bestStop,
         type: 'restaurant',
         name: restaurantCoords[bestStop - numWarehouses]?.name || `Restaurant ${bestStop - numWarehouses + 1}`,
         address: restaurantCoords[bestStop - numWarehouses]?.address || '',
         arrivalTime: formatTime(bestArrivalTime),
-        cumulativeSeconds: cumulativeTime,
-        load: currentLoad,
+        cumulativeSeconds: vState.cumulativeTime,
+        load: vState.currentLoad,
         waited: bestWaitTime > 0 ? `${Math.round(bestWaitTime/60)}m` : '0m',
         priorityLevel: restaurantCoords[bestStop - numWarehouses]?.priorityLevel
       });
 
-      currentLocation = bestStop;
+      vState.currentLocation = bestStop;
       unassigned.delete(bestStop);
-      assignedCount++; // Tracking for the logs
+      progress = true; 
     }
+  }
 
-    console.log(`  Vehicle ${vehicle.name}: assigned ${assignedCount} restaurants`);
+  // 4. Finalize all active routes (Return to Warehouse)
+  const routes = [];
+  let totalDistance = 0;
+  let totalLoad = 0;
+  let totalCost = 0;
 
-    // Return to depot - ONLY if we have assigned restaurants
-    if (route.stops.length > 1) { 
-      const returnDist = distanceMatrix[currentLocation][vehicle.end];
-      const returnTime = durationMatrix[currentLocation][vehicle.end];
-      route.distance += returnDist;
-      route.cost = route.distance * vehicle.costFactor / 1000;
-      totalDistance += route.distance;
-      totalCost += route.cost;
+  vStates.forEach(vState => {
+    // If vehicle did work, OR if it's currently stranded on the road (Current GPS != End Warehouse)
+    if (vState.route.stops.length > 1 || vState.currentLocation !== vState.end) {
+      const returnDist = distanceMatrix[vState.currentLocation][vState.end];
+      const returnTime = durationMatrix[vState.currentLocation][vState.end];
       
-      // Add return to warehouse
-      const returnCumulativeTime = cumulativeTime + returnTime;
-      route.stops.push({
-        index: vehicle.end,
+      vState.route.distance += returnDist;
+      vState.route.cost = vState.route.distance * vState.costFactor / 1000;
+      
+      totalDistance += vState.route.distance;
+      totalCost += vState.route.cost;
+      
+      const returnCumulativeTime = vState.cumulativeTime + returnTime;
+      
+      vState.route.stops.push({
+        index: vState.end,
         type: 'warehouse',
-        name: warehouses[vehicle.end]?.name || 'Warehouse',
+        name: warehouses[vState.end]?.name || 'Warehouse',
         arrivalTime: formatTime(returnCumulativeTime),
         cumulativeSeconds: returnCumulativeTime,
         load: 0
       });
       
-      routes.push(route);
+      routes.push(vState.route);
+    } else {
+      // Vehicle is empty and sitting at the original warehouse (Completely unused)
+      routes.push({
+        ...vState.route,
+        warning: 'No task assigned'
+      });
     }
   });
 
-  console.log('Final unassigned count:', unassigned.size);
-
-  // Track all vehicles that got no assignments (empty routes)
-  const emptyVehicles = sortedFleet.filter(vehicle => {
-    return !routes.some(r => r.vehicleName === vehicle.name);
-  });
-
-  // Add empty vehicles as "No Task" routes
-  emptyVehicles.forEach(vehicle => {
-    const warehouseIndex = vehicle.start;
-    routes.push({
-      vehicleName: vehicle.name,
-      warehouse: warehouseIndex,
-      warehouseName: warehouses[warehouseIndex]?.name || 'Unknown Warehouse',
-      stops: [{
-        index: warehouseIndex,
-        type: 'warehouse',
-        name: warehouses[warehouseIndex]?.name || 'Warehouse',
-        arrivalTime: formatTime(0),
-        cumulativeSeconds: 0,
-        load: 0
-      }],
-      distance: 0,
-      load: 0,
-      cost: 0,
-      warning: 'No task assigned'
-    });
-  });
-
-  // If restaurants remain unassigned, create a summary
+  // 5. Unassigned Summary
   if (unassigned.size > 0) {
     const remainingRestaurants = Array.from(unassigned);
     const totalDemand = remainingRestaurants.reduce((sum, idx) => sum + demands[idx], 0);
-    
     routes.push({
       vehicleName: 'Unassigned',
       warehouse: null,
-      warehouseName: null,
       stops: remainingRestaurants.map(idx => ({
         index: idx,
         type: 'restaurant',
-        name: restaurantCoords[idx - numWarehouses]?.name || `Restaurant ${idx - numWarehouses + 1}`,
-        address: restaurantCoords[idx - numWarehouses]?.address || '',
-        arrivalTime: null,
-        cumulativeSeconds: null,
+        name: restaurantCoords[idx - numWarehouses]?.name || `Restaurant`,
         load: demands[idx]
       })),
-      distance: 0,
-      load: totalDemand,
-      cost: 0,
+      distance: 0, load: totalDemand, cost: 0,
       warning: 'Could not assign all restaurants to available fleet'
     });
   }
-
-  console.log('=== VRP Solver Complete ===');
-  console.log('Total routes:', routes.length);
-  console.log('Assigned routes:', routes.filter(r => r.vehicleName !== 'Unassigned').length);
-  console.log('Unassigned routes:', routes.filter(r => r.vehicleName === 'Unassigned').length);
 
   return {
     routes,
     summary: {
       totalRoutes: routes.length,
-      totalDistance: totalDistance / 1000, // km
+      totalDistance: totalDistance / 1000,
       totalLoad: totalLoad,
       totalCost: totalCost,
       unassignedCount: unassigned.size

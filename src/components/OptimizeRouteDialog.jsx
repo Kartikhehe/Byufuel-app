@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Dialog, DialogTitle, DialogContent, Button, TextField, List, ListItem, Box, useTheme, CircularProgress, Typography, InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText, IconButton, Checkbox, Stepper, Step, StepLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Select } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, Button, TextField, List, ListItem, Box, useTheme, CircularProgress, Typography, InputAdornment, Menu, MenuItem, ListItemIcon, ListItemText, IconButton, Checkbox, Stepper, Step, StepLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Select, TablePagination } from '@mui/material';
 import { Folder as FolderIcon, Search, Sort, SwapVertRounded, ArrowBack, ArrowForward, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime } from '@mui/icons-material';
 
 import { warehousesAPI, fleetsAPI, restaurantsAPI, optimizeAPI } from '../services/api';
@@ -8,6 +8,7 @@ function OptimizeRouteDialog({ open, onClose, onShowSnackbar, onNext }) {
   const theme = useTheme();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  
   
   // Step 1: Warehouses
   const [warehouses, setWarehouses] = useState([]);
@@ -32,6 +33,18 @@ const [restaurantAmounts, setRestaurantAmounts] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState('newest');
   const [sortMenuAnchor, setSortMenuAnchor] = useState(null);
+
+  // --- PAGINATION STATE ---
+  const [warehousePage, setWarehousePage] = useState(0);
+  const [warehouseRowsPerPage, setWarehouseRowsPerPage] = useState(10);
+  const [restaurantPage, setRestaurantPage] = useState(0);
+  const [restaurantRowsPerPage, setRestaurantRowsPerPage] = useState(10);
+
+  // Reset pages when search changes
+  useEffect(() => {
+    setWarehousePage(0);
+    setRestaurantPage(0);
+  }, [searchQuery, sortOption]);
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -153,6 +166,13 @@ const [restaurantAmounts, setRestaurantAmounts] = useState({});
 
     return filtered;
   }, [warehouses, restaurants, searchQuery, sortOption, step]);
+
+  // Get the paginated slice of the filtered items
+  const paginatedItems = useMemo(() => {
+    const page = step === 1 ? warehousePage : restaurantPage;
+    const rowsPerPage = step === 1 ? warehouseRowsPerPage : restaurantRowsPerPage;
+    return processedItems.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  }, [processedItems, step, warehousePage, warehouseRowsPerPage, restaurantPage, restaurantRowsPerPage]);
 
   // Get selected warehouses with details
   const selectedWarehouses = useMemo(() => {
@@ -488,50 +508,68 @@ const [restaurantAmounts, setRestaurantAmounts] = useState({});
                 <CircularProgress />
               </Box>
             ) : (
-              <List sx={{ maxHeight: '40vh', overflow: 'auto', mb: 3, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
-                {processedItems.map((warehouse) => (
-                  <ListItem key={warehouse.id} disablePadding>
-                    <Box
-                      onClick={() => handleWarehouseToggle(warehouse.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleWarehouseToggle(warehouse.id);
-                        }
-                      }}
-                      tabIndex={0}
-                      sx={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        p: 1.5,
-                        cursor: 'pointer',
-                        backgroundColor: selectedWarehouseIds.includes(warehouse.id) ? theme.palette.action.selected : 'transparent',
-                        '&:hover': { backgroundColor: theme.palette.action.hover },
-                        borderBottom: `1px solid ${theme.palette.divider}`
-                      }}
-                    >
-                      <Checkbox
-                        checked={selectedWarehouseIds.includes(warehouse.id)}
-                        onChange={() => handleWarehouseToggle(warehouse.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        sx={{ mr: 1 }}
-                      />
-                      <FolderIcon sx={{ mr: 2, color: '#4CAF50' }} />
-                      <Box sx={{ flexGrow: 1 }}>
-                        <Typography variant="body1" fontWeight={500}>{warehouse.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatAddress(warehouse.address, 40)}
-                        </Typography>
+              <>
+                <List sx={{ maxHeight: '40vh', overflow: 'auto', mb: 1, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                  {/* 👇 CHANGED to paginatedItems 👇 */}
+                  {paginatedItems.map((warehouse) => (
+                    <ListItem key={warehouse.id} disablePadding>
+                      <Box
+                        onClick={() => handleWarehouseToggle(warehouse.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleWarehouseToggle(warehouse.id);
+                        }}
+                        tabIndex={0}
+                        sx={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          p: 1.5,
+                          cursor: 'pointer',
+                          backgroundColor: selectedWarehouseIds.includes(warehouse.id) ? theme.palette.action.selected : 'transparent',
+                          '&:hover': { backgroundColor: theme.palette.action.hover },
+                          borderBottom: `1px solid ${theme.palette.divider}`
+                        }}
+                      >
+                        <Checkbox
+                          checked={selectedWarehouseIds.includes(warehouse.id)}
+                          onChange={() => handleWarehouseToggle(warehouse.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ mr: 1 }}
+                        />
+                        <FolderIcon sx={{ mr: 2, color: '#4CAF50' }} />
+                        <Box sx={{ flexGrow: 1 }}>
+                          <Typography variant="body1" fontWeight={500}>{warehouse.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatAddress(warehouse.address, 40)}
+                          </Typography>
+                        </Box>
                       </Box>
+                    </ListItem>
+                  ))}
+                  {processedItems.length === 0 && !warehousesLoading && (
+                    <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+                      <Typography>No warehouses found</Typography>
                     </Box>
-                  </ListItem>
-                ))}
-                {processedItems.length === 0 && !warehousesLoading && (
-                  <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
-                    <Typography>No warehouses found</Typography>
-                  </Box>
+                  )}
+                </List>
+                
+                {/* 👇 ADDED Pagination Component 👇 */}
+                {!warehousesLoading && processedItems.length > 0 && (
+                  <TablePagination
+                    component="div"
+                    count={processedItems.length}
+                    page={warehousePage}
+                    onPageChange={(e, newPage) => setWarehousePage(newPage)}
+                    rowsPerPage={warehouseRowsPerPage}
+                    onRowsPerPageChange={(e) => {
+                      setWarehouseRowsPerPage(parseInt(e.target.value, 10));
+                      setWarehousePage(0);
+                    }}
+                    rowsPerPageOptions={[10, 20, 50, 100]}
+                    sx={{ mb: 2, borderBottom: 'none' }}
+                  />
                 )}
-              </List>
+              </>
             )}
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
@@ -710,92 +748,110 @@ const [restaurantAmounts, setRestaurantAmounts] = useState({});
                 <CircularProgress />
               </Box>
             ) : (
-              <List sx={{ maxHeight: '40vh', overflow: 'auto', mb: 3, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
-                {processedItems.map((restaurant) => (
-                  <ListItem key={restaurant.id} disablePadding>
-                    <Box
-                      onClick={() => handleRestaurantToggle(restaurant.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleRestaurantToggle(restaurant.id);
-                        }
-                      }}
-                      tabIndex={0}
-                      sx={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        p: 1.5,
-                        cursor: 'pointer',
-                        backgroundColor: selectedRestaurantIds.includes(restaurant.id) ? theme.palette.action.selected : 'transparent',
-                        '&:hover': { backgroundColor: theme.palette.action.hover },
-                        borderBottom: `1px solid ${theme.palette.divider}`
-                      }}
-                    >
-                      <Checkbox
-                        checked={selectedRestaurantIds.includes(restaurant.id)}
-                        onChange={() => handleRestaurantToggle(restaurant.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        sx={{ mr: 1 }}
-                      />
-                      <RestaurantIcon sx={{ mr: 2, color: '#FF5722' }} />
-                      <Box sx={{ flexGrow: 1 }}>
-                        <Typography variant="body1" fontWeight={500}>{restaurant.outlet_name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatAddress((restaurant.area || '') + (restaurant.city ? `, ${restaurant.city}` : ''), 40)}
-                        </Typography>
+              <>
+                <List sx={{ maxHeight: '40vh', overflow: 'auto', mb: 1, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                  {/* 👇 CHANGED to paginatedItems 👇 */}
+                  {paginatedItems.map((restaurant) => (
+                    <ListItem key={restaurant.id} disablePadding>
+                      <Box
+                        onClick={() => handleRestaurantToggle(restaurant.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRestaurantToggle(restaurant.id);
+                        }}
+                        tabIndex={0}
+                        sx={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          p: 1.5,
+                          cursor: 'pointer',
+                          backgroundColor: selectedRestaurantIds.includes(restaurant.id) ? theme.palette.action.selected : 'transparent',
+                          '&:hover': { backgroundColor: theme.palette.action.hover },
+                          borderBottom: `1px solid ${theme.palette.divider}`
+                        }}
+                      >
+                        <Checkbox
+                          checked={selectedRestaurantIds.includes(restaurant.id)}
+                          onChange={() => handleRestaurantToggle(restaurant.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ mr: 1 }}
+                        />
+                        <RestaurantIcon sx={{ mr: 2, color: '#FF5722' }} />
+                        <Box sx={{ flexGrow: 1 }}>
+                          <Typography variant="body1" fontWeight={500}>{restaurant.outlet_name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatAddress((restaurant.area || '') + (restaurant.city ? `, ${restaurant.city}` : ''), 40)}
+                          </Typography>
+                        </Box>
+                        {selectedRestaurantIds.includes(restaurant.id) && (
+                          <>
+                            <TextField
+                              size="small"
+                              placeholder="Amount (L)"
+                              value={restaurantAmounts[restaurant.id] || ''}
+                              onChange={(e) => handleRestaurantAmountChange(restaurant.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              type="number"
+                              sx={{ width: 100, mr: 1 }}
+                              InputProps={{
+                                endAdornment: <Typography sx={{ ml: 0.5 }}>L</Typography>
+                              }}
+                            />
+                            <Select
+                              size="small"
+                              value={restaurantPriorities[restaurant.id] || 1}
+                              onChange={(e) => setRestaurantPriorities(prev => ({ ...prev, [restaurant.id]: parseInt(e.target.value) }))}
+                              onClick={(e) => e.stopPropagation()}
+                              sx={{ width: 90, mr: 1 }}
+                            >
+                              <MenuItem value={1}>Normal</MenuItem>
+                              <MenuItem value={2}>High</MenuItem>
+                              <MenuItem value={3}>Supreme</MenuItem>
+                            </Select>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setTimeWindowAnchor({ open: true, restaurantId: restaurant.id });
+                              }}
+                              sx={{ mr: 1 }}
+                            >
+                              <AccessTime />
+                            </IconButton>
+                            {restaurantTimeWindows[restaurant.id] && (
+                              <Typography variant="caption" sx={{ mr: 1 }}>
+                                {restaurantTimeWindows[restaurant.id].start}-{restaurantTimeWindows[restaurant.id].end}
+                              </Typography>
+                            )}
+                          </>
+                        )}
                       </Box>
-{selectedRestaurantIds.includes(restaurant.id) && (
-                        <>
-                          <TextField
-                            size="small"
-                            placeholder="Amount (L)"
-                            value={restaurantAmounts[restaurant.id] || ''}
-                            onChange={(e) => handleRestaurantAmountChange(restaurant.id, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            type="number"
-                            sx={{ width: 100, mr: 1 }}
-                            InputProps={{
-                              endAdornment: <Typography sx={{ ml: 0.5 }}>L</Typography>
-                            }}
-                          />
-                          <Select
-                            size="small"
-                            value={restaurantPriorities[restaurant.id] || 1}
-                            onChange={(e) => setRestaurantPriorities(prev => ({ ...prev, [restaurant.id]: parseInt(e.target.value) }))}
-                            onClick={(e) => e.stopPropagation()}
-                            sx={{ width: 90, mr: 1 }}
-                          >
-                            <MenuItem value={1}>Normal</MenuItem>
-                            <MenuItem value={2}>High</MenuItem>
-                            <MenuItem value={3}>Supreme</MenuItem>
-                          </Select>
-<IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setTimeWindowAnchor({ open: true, restaurantId: restaurant.id });
-                            }}
-                            sx={{ mr: 1 }}
-                          >
-                            <AccessTime />
-                          </IconButton>
-                          {restaurantTimeWindows[restaurant.id] && (
-                            <Typography variant="caption" sx={{ mr: 1 }}>
-                              {restaurantTimeWindows[restaurant.id].start}-{restaurantTimeWindows[restaurant.id].end}
-                            </Typography>
-                          )}
-                        </>
-                      )}
+                    </ListItem>
+                  ))}
+                  {processedItems.length === 0 && !restaurantsLoading && (
+                    <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+                      <Typography>No restaurants found</Typography>
                     </Box>
-                  </ListItem>
-                ))}
-                {processedItems.length === 0 && !restaurantsLoading && (
-                  <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
-                    <Typography>No restaurants found</Typography>
-                  </Box>
+                  )}
+                </List>
+
+                {/* 👇 ADDED Pagination Component 👇 */}
+                {!restaurantsLoading && processedItems.length > 0 && (
+                  <TablePagination
+                    component="div"
+                    count={processedItems.length}
+                    page={restaurantPage}
+                    onPageChange={(e, newPage) => setRestaurantPage(newPage)}
+                    rowsPerPage={restaurantRowsPerPage}
+                    onRowsPerPageChange={(e) => {
+                      setRestaurantRowsPerPage(parseInt(e.target.value, 10));
+                      setRestaurantPage(0);
+                    }}
+                    rowsPerPageOptions={[10, 20, 50, 100]}
+                    sx={{ mb: 2, borderBottom: 'none' }}
+                  />
                 )}
-              </List>
+              </>
             )}
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'space-between' }}>

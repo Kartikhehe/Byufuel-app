@@ -6,6 +6,7 @@ import 'leaflet-rotate/dist/leaflet-rotate.js';
 import markerIcon2xUrl from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
 import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
+import DynamicPickupDialog from '../components/DynamicPickupDialog'; 
 import {
   Box,
   useTheme,
@@ -20,8 +21,10 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  Switch
 } from '@mui/material';
-import { MyLocation, Menu as MenuIcon } from '@mui/icons-material';
+// Update this line at the top of MapApp.jsx
+import { MyLocation, Menu as MenuIcon, Restaurant as RestaurantIcon, AccessTime, KeyboardArrowUp } from '@mui/icons-material';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import CustomSnackbar from '../components/Snackbar';
@@ -42,7 +45,7 @@ import BottomSheet from '../components/BottomSheet';
 import WaypointDetails from '../components/WaypointDetails';
 import { createLiveLocationMarker, updateMobileMapHeight } from '../utils/mapUtils';
 import { INDIA_CENTER } from '../constants/mapConstants';
-import { warehousesAPI, fleetsAPI, restaurantsAPI } from '../services/api';
+import { warehousesAPI, fleetsAPI, restaurantsAPI, optimizeAPI } from '../services/api';
 
 // Ensure default Leaflet markers load correctly when bundled (e.g., on Vercel)
 delete L.Icon.Default.prototype._getIconUrl;
@@ -76,11 +79,19 @@ function App() {
   const [optimizeRouteDialogOpen, setOptimizeRouteDialogOpen] = useState(false);
   const [routeResultsOpen, setRouteResultsOpen] = useState(false);
   const [routeOptimizationResults, setRouteOptimizationResults] = useState(null);
+  const [isResultsMinimized, setIsResultsMinimized] = useState(false);
   const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [restaurantData, setRestaurantData] = useState({});
   const [restaurantLocationSelectionActive, setRestaurantLocationSelectionActive] = useState(false);
   const [satelliteHybridMode, setSatelliteHybridMode] = useState(false);
   const [bottomSheetExpanded, setBottomSheetExpanded] = useState(false);
+
+  // --- ADD THESE NEW STATES FOR DYNAMIC VRP ---
+  const [isLiveDispatchMode, setIsLiveDispatchMode] = useState(false);
+  const [activeFleetRoutes, setActiveFleetRoutes] = useState(null);
+  const [dynamicPickupDialogOpen, setDynamicPickupDialogOpen] = useState(false);
+  // --------------------------------------------
+
   
   // Warehouse markers state
   const [warehouses, setWarehouses] = useState([]);
@@ -105,13 +116,224 @@ function App() {
   const bottomSheetRef = useRef(null);
   const [mapDynamicHeight, setMapDynamicHeight] = useState(null);
   
-  const theme = createAppTheme(darkMode ? 'dark' : 'light');
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { isAuthenticated } = useAuth();
+  // --- ADD DYNAMIC REROUTE LOGIC ---
+// --- TIME INTERPOLATION & DYNAMIC REROUTE LOGIC ---
+const parseTimeToSeconds = (timeStr) => {
+  if (!timeStr || timeStr === '-') return 0;
+  let isNextDay = timeStr.includes('Next day');
+  let t = timeStr.replace('Next day ', '').trim();
+  const [h, m] = t.split(':').map(Number);
+  let seconds = ((h - 8) * 3600) + (m * 60);
+  if (isNextDay) seconds += 24 * 3600;
+  return Math.max(0, seconds);
+};
 
-  useEffect(() => {
-    setSidebarOpen(isMobile ? false : true);
-  }, [isMobile]);
+const handleDynamicReroute = async (newPickup, simulatedTimeStr) => {
+  if (!routeOptimizationResults || !routeOptimizationResults.routes) {
+    showSnackbar('No active route to modify. Please run a standard optimization first.', 'warning');
+    return;
+  }
+  showSnackbar('Calculating exact live physical locations...', 'info');
+
+  const simulatedSeconds = simulatedTimeStr ? parseTimeToSeconds(simulatedTimeStr) : 0;
+  const activeVehicles = [];
+  let unserved = [];
+
+  routeOptimizationResults.routes.forEach(route => {
+    if (route.vehicleName === 'Unassigned' || !route.stops || route.stops.length < 2) return;
+
+    let lastVisitedStop = null;
+    let nextStop = null;
+    let prevStop = null;
+
+    // 1. Traverse Timeline to find exact physical position
+    for (let i = 0; i < route.stops.length; i++) {
+      const stop = route.stops[i];
+      const stopTime = parseTimeToSeconds(stop.arrivalTime);
+      if (stopTime <= simulatedSeconds) {
+        lastVisitedStop = stop;
+      }
+      if (stopTime > simulatedSeconds && !nextStop) {
+        nextStop = stop;
+        prevStop = i > 0 ? route.stops[i - 1] : stop;
+      }
+    }
+
+    // If no next stop, the truck is already parked at the warehouse for the night. Do not reroute.
+    if (!nextStop) return;
+
+    const currentLoad = lastVisitedStop ? parseFloat(lastVisitedStop.load || 0) : 0;
+    let currentLat, currentLng;
+    
+    // Calculate Exact Physics Ratio (Including 15-min waiting periods)
+    const isPrevRestaurant = prevStop.type === 'restaurant';
+    const prevArrivalTime = parseTimeToSeconds(prevStop.arrivalTime);
+    const departureTimeFromPrev = prevArrivalTime + (isPrevRestaurant ? 900 : 0); // Stays parked for 15 mins
+    const nextArrivalTime = parseTimeToSeconds(nextStop.arrivalTime);
+
+    if (simulatedSeconds <= departureTimeFromPrev || prevStop === nextStop) {
+      // Truck is physically parked at the location processing UCO
+      const wp = routeOptimizationResults.waypoints.find(w => w.index === prevStop.index);
+      currentLat = wp.latitude; currentLng = wp.longitude;
+    } else {
+      // Truck is actively driving on the road
+      const travelTime = nextArrivalTime - departureTimeFromPrev;
+      const elapsedDrivingTime = simulatedSeconds - departureTimeFromPrev;
+      const ratio = Math.max(0, Math.min(1, elapsedDrivingTime / travelTime));
+      
+      const wpPrev = routeOptimizationResults.waypoints.find(w => w.index === prevStop.index);
+      const wpNext = routeOptimizationResults.waypoints.find(w => w.index === nextStop.index);
+      currentLat = wpPrev.latitude + (wpNext.latitude - wpPrev.latitude) * ratio;
+      currentLng = wpPrev.longitude + (wpNext.longitude - wpPrev.longitude) * ratio;
+    }
+
+    // 2. Gather Remaining Unserved Pickups (PRESERVING SUPREME PRIORITIES)
+    const vehicleUnserved = route.stops
+      .filter(s => s.type === 'restaurant' && parseTimeToSeconds(s.arrivalTime) > simulatedSeconds)
+      .map(s => {
+        const fullData = restaurants.find(r => r.outlet_name === s.name);
+        const stopIdx = route.stops.indexOf(s);
+        const previousLoad = parseFloat(route.stops[stopIdx - 1]?.load || 0);
+        const demand = parseFloat(s.load) - previousLoad;
+        
+        return fullData ? { 
+          ...fullData, 
+          amount: demand, 
+          priorityLevel: s.priorityLevel || 1 // Critical: Preserves old Supreme tags!
+        } : null;
+      }).filter(Boolean);
+
+    unserved = [...unserved, ...vehicleUnserved];
+
+    // 3. Register Vehicle State
+    let cap = 500;
+    if (route.vehicleName.toLowerCase().includes('moped')) cap = 80;
+    else if (route.vehicleName.toLowerCase().includes('intra')) cap = 1250;
+    else if (route.vehicleName.toLowerCase().includes('bolero')) cap = 1900;
+
+    activeVehicles.push({
+      name: route.vehicleName,
+      lat: currentLat,
+      lng: currentLng,
+      totalCapacity: cap,
+      currentLoad: currentLoad,
+      warehouseId: warehouses.find(w => w.name === route.warehouseName)?.id || null
+    });
+  });
+
+  try {
+    const response = await optimizeAPI.dynamicReroute({
+      activeVehicles,
+      unservedRestaurants: unserved,
+      newPickup,
+      warehouses,
+      currentTimeSeconds: simulatedSeconds
+    });
+    setRouteOptimizationResults(response);
+    setRouteResultsOpen(true);
+    showSnackbar('Dynamic routing successful!', 'success');
+  } catch (error) {
+    console.error('Rerouting error:', error);
+    showSnackbar('Failed to recalculate route.', 'error');
+  }
+};
+// ---------------------------------
+
+const theme = createAppTheme(darkMode ? 'dark' : 'light');
+const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+const { isAuthenticated } = useAuth();
+
+useEffect(() => {
+  setSidebarOpen(isMobile ? false : true);
+}, [isMobile]);
+
+// --- ADD ROUTE DRAWING EFFECT WITH LIVE TRUCK MARKER ---
+const routeLayersRef = useRef([]);
+
+useEffect(() => {
+  if (!mapRef.current || !routeOptimizationResults) return;
+  const map = mapRef.current;
+
+  // Clear previous route lines + markers
+  routeLayersRef.current.forEach(layer => map.removeLayer(layer));
+  routeLayersRef.current = [];
+
+  const colors = ['#2196F3', '#FF9800', '#9C27B0', '#F44336', '#00BCD4'];
+
+  routeOptimizationResults.routes.forEach((route, index) => {
+    if (route.vehicleName === 'Unassigned' || !route.stops || route.stops.length === 0) return;
+
+    const vehicleColor = colors[index % colors.length];
+    const waypoints = [];
+
+    route.stops.forEach((stop, stopIdx) => {
+      const wp = routeOptimizationResults.waypoints.find(w => w.index === stop.index);
+      if (!wp) return;
+
+      const latlng = [wp.latitude, wp.longitude];
+      waypoints.push(latlng);
+
+      let label = stopIdx;
+      if (stopIdx === 0) label = 'S';
+      if (stopIdx === route.stops.length - 1) label = 'E';
+
+      // Detect if this is the "Live" location we mathematically calculated
+      const isCurrentLoc = wp.name === 'Current GPS Location';
+      
+      const markerHtml = `<div style="
+        background-color: ${isCurrentLoc ? '#2E2E2E' : vehicleColor};
+        color: white;
+        border-radius: 50%;
+        width: ${isCurrentLoc ? '32px' : '24px'};
+        height: ${isCurrentLoc ? '32px' : '24px'};
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: ${isCurrentLoc ? '16px' : '12px'};
+        font-weight: bold;
+        border: 2px solid ${isCurrentLoc ? '#4CAF50' : 'white'};
+        box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        z-index: ${isCurrentLoc ? 1000 : 1};
+      ">${isCurrentLoc ? '🚚' : label}</div>`;
+
+      const icon = L.divIcon({
+        html: markerHtml,
+        className: '',
+        iconSize: isCurrentLoc ? [32, 32] : [24, 24],
+        iconAnchor: isCurrentLoc ? [16, 16] : [12, 12]
+      });
+
+      const marker = L.marker(latlng, { icon }).addTo(map);
+
+      marker.bindTooltip(
+        `<b>${stop.name}</b><br/>Vehicle: ${route.vehicleName}<br/>Arr: ${stop.arrivalTime || 'N/A'}`
+      );
+
+      routeLayersRef.current.push(marker);
+    });
+
+    if (waypoints.length > 1) {
+      const polyline = L.polyline(waypoints, {
+        color: vehicleColor,
+        weight: 4,
+        opacity: 0.8,
+        dashArray: isLiveDispatchMode ? '10, 10' : null,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(map);
+
+      routeLayersRef.current.push(polyline);
+    }
+  });
+
+  // Fit map bounds to show the whole route
+  if (routeLayersRef.current.length > 0) {
+    const group = new L.featureGroup(routeLayersRef.current);
+    map.fitBounds(group.getBounds(), { padding: [50, 50] });
+  }
+}, [routeOptimizationResults, isLiveDispatchMode]);
+// ---------------------------------
+  // ---------------------------------
 
   const handleToggleDarkMode = () => {
     const newMode = !darkMode;
@@ -225,26 +447,26 @@ function App() {
         return;
       }
       setStartSurveyDialogOpen(true);
-    } else if (item === 'View all Warehouses') {
+    }  else if (item === 'View all Warehouses') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
         return;
       }
-      setVisibleWarehouseIds(warehouses.map(w => String(w.id)));
-      if (warehouses[0]?.latitude && warehouses[0]?.longitude) {
-        handleNavigateToWarehouse(warehouses[0]);
-      }
+      // 🔥 No longer plotting all visible IDs
+      setStartSurveyDialogOpen(true); // Just open the list instead
+      
     } else if (item === 'View Fleets') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
         return;
       }
       setFleetListDialogOpen(true);
-    } else if (item === 'Restaurants' || item === 'View Restaurants') {
+    } else if (item === 'Restaurants' || item === 'View Restaurants' || item === 'View all Restaurants') {
       if (!isAuthenticated) {
         setLoginPromptOpen(true);
         return;
       }
+      // 🔥 Merged "View all" to just open the dialog without plotting all IDs
       setRestaurantListDialogOpen(true);
     } else if (item === 'View all Restaurants') {
       if (!isAuthenticated) {
@@ -418,6 +640,7 @@ function App() {
   useEffect(() => {
     // initialize map only once
     const map = L.map('map', {
+
       zoomControl: false,
       attributionControl: false,
       rotate: true,
@@ -479,6 +702,7 @@ function App() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (!mapRef.current || !mapRef.current._panes) return;
           const { latitude, longitude, accuracy } = position.coords;
           const hasAccuracy = typeof accuracy === 'number' && !Number.isNaN(accuracy);
 
@@ -533,9 +757,9 @@ function App() {
                 setSnackbar({ open: true, message: `Low GPS accuracy: ±${Math.round(newAccuracy)}m — location may be imprecise`, severity: 'warning' });
               }
 
-              if (liveLocationMarkerRef.current) {
+              if (liveLocationMarkerRef.current && liveLocationMarkerRef.current._icon) {
                 liveLocationMarkerRef.current.setLatLng([newLat, newLng]);
-              } else if (mapRef.current) {
+              } else if (mapRef.current && mapRef.current._panes) {
                 const liveMarker = createLiveLocationMarker([newLat, newLng]).addTo(mapRef.current);
                 liveLocationMarkerRef.current = liveMarker;
               }
@@ -794,6 +1018,7 @@ function App() {
   useEffect(() => {
     if (!mapRef.current) return;
 
+
     const map = mapRef.current;
 
     const updateCenterCoordinates = () => {
@@ -834,39 +1059,25 @@ function App() {
     updateMobileMapHeight(isMobile, false, bottomSheetExpanded, { liveCoordsRef }, setMapDynamicHeight);
   };
 
-  // Load warehouses and add markers
+  // Update loadWarehouses to this:
   const loadWarehouses = async () => {
     if (!isAuthenticated) return;
     try {
       const data = await warehousesAPI.getAll();
       setWarehouses(data);
-      // Add markers for each warehouse
-      if (mapRef.current) {
-        data.forEach(warehouse => {
-          if (warehouse.latitude && warehouse.longitude) {
-            addWarehouseMarker(warehouse);
-          }
-        });
-      }
+      // 🔥 REMOVED THE AUTO-PLOTTING FOREACH LOOP HERE
     } catch (err) {
       console.error('Error loading warehouses:', err);
     }
   };
 
-  // Load restaurants and add markers
+  // Update loadRestaurants to this:
   const loadRestaurants = async () => {
     if (!isAuthenticated) return;
     try {
       const data = await restaurantsAPI.getAll();
       setRestaurants(data);
-      // Add markers for each restaurant
-      if (mapRef.current) {
-        data.forEach(restaurant => {
-          if (restaurant.latitude && restaurant.longitude) {
-            addRestaurantMarker(restaurant);
-          }
-        });
-      }
+      // 🔥 REMOVED THE AUTO-PLOTTING FOREACH LOOP HERE
     } catch (err) {
       console.error('Error loading restaurants:', err);
     }
@@ -874,7 +1085,7 @@ function App() {
 
   // Add a marker for a restaurant
   const addRestaurantMarker = (restaurant) => {
-    if (!mapRef.current || restaurantMarkers[restaurant.id]) return;
+    if (!mapRef.current || !mapRef.current._panes || restaurantMarkers[restaurant.id]) return;
     
     const lat = parseFloat(restaurant.latitude);
     const lng = parseFloat(restaurant.longitude);
@@ -933,7 +1144,7 @@ function App() {
 
   // Add a marker for a warehouse
   const addWarehouseMarker = (warehouse) => {
-    if (!mapRef.current || warehouseMarkers[warehouse.id]) return;
+    if (!mapRef.current || !mapRef.current._panes || warehouseMarkers[warehouse.id]) return;
     
     const lat = parseFloat(warehouse.latitude);
     const lng = parseFloat(warehouse.longitude);
@@ -1276,12 +1487,27 @@ function App() {
             console.log('Route optimization results:', results);
             setRouteOptimizationResults(results);
             setRouteResultsOpen(true);
+            setIsResultsMinimized(false);
             setOptimizeRouteDialogOpen(false);
           }}
         />
+        {/* --- ADD DYNAMIC PICKUP DIALOG HERE --- */}
+        <DynamicPickupDialog 
+          open={dynamicPickupDialogOpen}
+          onClose={() => setDynamicPickupDialogOpen(false)}
+          onSubmit={handleDynamicReroute}
+          restaurants={restaurants}
+        />
         <RouteResultsDialog
           open={routeResultsOpen}
-          onClose={() => setRouteResultsOpen(false)}
+          onClose={() => {
+            setRouteResultsOpen(false);
+            setRouteOptimizationResults(null);
+          }}
+          onMinimize={() => {
+            setRouteResultsOpen(false);
+            setIsResultsMinimized(true);
+          }}
           results={routeOptimizationResults}
           onRestaurantClick={(stop) => {
             // Navigate to restaurant location on map
@@ -1366,6 +1592,84 @@ function App() {
               }}
             />
           </Box>
+
+          {/* --- ADD THIS DYNAMIC VRP UI BLOCK --- */}
+          {isAuthenticated && (
+            <>
+              {/* Live Dispatch Toggle (Top Left) */}
+              <Paper sx={{ 
+                position: 'absolute', 
+                top: { xs: '85px', sm: '75px' },
+                left: { xs: '15px', sm: sidebarOpen ? '280px' : '85px' },
+                zIndex: 1200,
+                p: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                borderRadius: 2
+              }}>
+
+                <Typography variant="body2" fontWeight={600} color={isLiveDispatchMode ? "error" : "text.secondary"}>
+                  Live Dispatch
+                </Typography>
+                <Switch 
+                  checked={isLiveDispatchMode} 
+                  onChange={(e) => setIsLiveDispatchMode(e.target.checked)} 
+                  color="error" 
+                  size="small"
+                />
+              </Paper>
+
+          {/* New Urgent Pickup FAB (Bottom Right - Only visible in Live Mode) */}
+              {isLiveDispatchMode && (
+                <Button
+                  variant="contained"
+                  color="error"
+                  startIcon={<RestaurantIcon />}
+                  sx={{ 
+                    position: 'absolute', 
+                    bottom: isMobile ? 120 : 40, 
+                    right: 20, 
+                    zIndex: 1000, 
+                    borderRadius: 8, 
+                    px: 3, 
+                    py: 1.5,
+                    boxShadow: 3
+                  }}
+                  onClick={() => setDynamicPickupDialogOpen(true)}
+                >
+                  Urgent Pickup
+                </Button>
+              )}
+
+              {/* Maximize button for minimized route results */}
+              {isResultsMinimized && (
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<KeyboardArrowUp />}
+                  onClick={() => {
+                    setRouteResultsOpen(true);
+                    setIsResultsMinimized(false);
+                  }}
+                  sx={{ 
+                    position: 'absolute', 
+                    bottom: 30, 
+                    left: '50%', 
+                    transform: 'translateX(-50%)', 
+                    zIndex: 1200,
+                    borderRadius: 8,
+                    px: 3,
+                    py: 1.5,
+                    boxShadow: 3
+                  }}
+                >
+                  Maximize Route Results
+                </Button>
+              )}
+            </>
+          )}
+          {/* --------------------------------------- */}
 
           {/* Live Coordinates card */}
           {!isMobile && (

@@ -3,25 +3,18 @@ import React, { useState, useMemo } from 'react';
 import { Dialog, DialogTitle, DialogContent, Button, Box, useTheme, Typography, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Dialog as ConfirmDialog } from '@mui/material';
 import { ExpandMore, LocalShipping as LocalShippingIcon, Restaurant as RestaurantIcon, AccessTime, LocationOn, Navigation, OpenInNew, ArrowDropDownCircle, ContentCopy } from '@mui/icons-material';
 
-function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
-  // Guard clause - must be first to ensure consistent hook order
-  if (!open) {
-    return null;
-  }
-
+function RouteResultsDialog({ open, onClose, onMinimize, results, onRestaurantClick }) {
   const theme = useTheme();
   const [expandedWarehouse, setExpandedWarehouse] = useState(null);
   const [expandedUnassigned, setExpandedUnassigned] = useState(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Check for valid results after hooks
-  if (!results || !results.routes) {
-    return null;
-  }
+  // Guards must come after ALL hooks to satisfy Rules of Hooks
+  // (Do not call hooks conditionally; compute safe fallbacks instead of early returns)
+  const safeResults = results && results.routes ? results : { routes: [], summary: {}, waypoints: [] };
+  const { routes, summary, waypoints } = safeResults;
 
-
-  const { routes, summary, waypoints } = results;
 
   const getWaypoint = (index) => {
     return waypoints.find(w => w.index === index) || { name: `Point ${index}`, type: 'unknown' };
@@ -179,10 +172,6 @@ function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
     }
   };
 
-  const hasNoAssignedStops = (route) => {
-    return route.stops.filter(s => s.type === 'restaurant').length === 0;
-  };
-
   // Group routes by warehouse for rendering
   const routesByWarehouse = useMemo(() => {
     const grouped = {};
@@ -245,26 +234,41 @@ function RouteResultsDialog({ open, onClose, results, onRestaurantClick }) {
           pr: 2,
           position: 'relative'
         }}>
-          <Box sx={{ width: 100 }} />
-          Route Optimization Results
-          <Button
-            variant="contained"
-            startIcon={copySuccess ? <AccessTime /> : <ContentCopy />}
-            onClick={handleCopyRouteDetails}
-            sx={{ 
-              textTransform: 'none',
-              borderRadius: 2,
-              boxShadow: 'none',
-              bgcolor: copySuccess ? '#4CAF50' : theme.palette.text.primary,
-              color: theme.palette.background.paper,
-              '&:hover': { 
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Button
+              variant="contained"
+              startIcon={copySuccess ? <AccessTime /> : <ContentCopy />}
+              onClick={handleCopyRouteDetails}
+              sx={{ 
+                textTransform: 'none',
+                borderRadius: 2,
                 boxShadow: 'none',
-                bgcolor: copySuccess ? '#43A047' : theme.palette.text.secondary
-              }
-            }}
-          >
-            {copySuccess ? 'Copied!' : 'Copy Route Details'}
-          </Button>
+                bgcolor: copySuccess ? '#4CAF50' : theme.palette.text.primary,
+                color: theme.palette.background.paper,
+                '&:hover': { 
+                  boxShadow: 'none',
+                  bgcolor: copySuccess ? '#43A047' : theme.palette.text.secondary
+                }
+              }}
+            >
+              {copySuccess ? 'Copied!' : 'Copy Route Details'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => onMinimize && onMinimize()}
+              sx={{ 
+                textTransform: 'none',
+                borderRadius: 2,
+                borderColor: theme.palette.divider,
+                color: theme.palette.text.primary
+              }}
+            >
+              Minimize to Map
+            </Button>
+          </Box> 
+          <Box sx={{ flex: 1, textAlign: 'center' }}>
+            Route Optimization Results
+          </Box>
         </DialogTitle>
 
         <DialogContent sx={{ pt: 3, p: 0 }}>

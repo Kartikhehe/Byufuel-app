@@ -353,4 +353,21 @@ export const optimizeAPI = {
     }
     return response.json();
   },
+
+  // --- ADD THIS NEW FUNCTION FOR DYNAMIC REROUTING ---
+  dynamicReroute: async (data) => {
+    const response = await fetch(`${API_BASE_URL}/optimize/dynamic-reroute`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Authentication required');
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to dynamically reroute');
+    }
+    return response.json();
+  },
+  // ---------------------------------------------------
 };
