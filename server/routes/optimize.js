@@ -279,13 +279,17 @@ router.post('/dynamic-reroute', async (req, res) => {
     }
 
     // 3. Configure Fleet Data for the remaining journey
+    // NOTE: This solver is greedy and only tracks loads via `demands`.
+    // For live dispatch we MUST start from the vehicle's already-picked load.
+    // So we pass `startLoad` and start `currentLoad` from it inside solveVRP.
     const fleetData = activeVehicles.map((v, idx) => ({
       name: v.name,
-      capacity: v.totalCapacity - v.currentLoad, // Only use remaining capacity
+      capacity: v.totalCapacity - (v.startLoad ?? 0), // remaining capacity
       start: idx, // Start at their current GPS coordinate index
       end: vehicleOffset + warehouses.findIndex(wh => wh.id === v.warehouseId), // End at their original warehouse
       costFactor: getVehicleCostFactor(v.name),
-      startTime: currentTime
+      startTime: currentTime,
+      startLoad: v.startLoad ?? v.currentLoad ?? 0
     }));
 
     // 4. Build Demands Array
@@ -409,19 +413,22 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
   const vStates = fleetData.map(v => ({
     ...v,
     currentLocation: v.start,
-    currentLoad: 0,
+    // live dispatch must start with the load already picked up before reroute
+    currentLoad: v.startLoad ?? 0,
     cumulativeTime: v.startTime || 0,
     route: {
       vehicleName: v.name,
       warehouse: v.start,
       warehouseName: warehouses[v.start]?.name || 'Unknown Warehouse',
       stops: [{
+
         index: v.start,
         type: 'warehouse',
         name: v.startTime ? 'Current GPS Location' : (warehouses[v.start]?.name || 'Warehouse'),
         arrivalTime: formatTime(v.startTime || 0),
         cumulativeSeconds: v.startTime || 0,
-        load: 0
+        // live dispatch must reflect already-picked-up load at reroute time
+        load: v.startLoad ?? 0
       }],
       distance: 0,
       load: 0,
@@ -538,6 +545,7 @@ function solveVRP(coords, distanceMatrix, durationMatrix, fleetData, demands, nu
         name: warehouses[vState.end]?.name || 'Warehouse',
         arrivalTime: formatTime(returnCumulativeTime),
         cumulativeSeconds: returnCumulativeTime,
+        // end-of-route: load is delivered back/emptied at warehouse
         load: 0
       });
       

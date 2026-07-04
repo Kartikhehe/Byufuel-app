@@ -30,10 +30,8 @@ function Sidebar({ sidebarOpen, onToggle, isMobile, onMenuItemClick }) {
   const menuItems = [
     { text: 'Add Warehouse', icon: <AddLocationAltOutlinedIcon />, action: () => onMenuItemClick('Add Warehouse') },
     { text: 'Warehouses', icon: <BookmarkAddedOutlinedIcon />, action: () => onMenuItemClick('Warehouses') },
-    { text: 'View all Warehouses', icon: <BookmarkAddedOutlinedIcon />, action: () => onMenuItemClick('View all Warehouses') },
     { text: 'View Fleets', icon: <LocalShippingIcon />, action: () => onMenuItemClick('View Fleets') },
     { text: 'Restaurants', icon: <RestaurantIcon />, action: () => onMenuItemClick('Restaurants') },
-    { text: 'View all Restaurants', icon: <RestaurantIcon />, action: () => onMenuItemClick('View all Restaurants') },
     { text: 'Optimize Route', icon: <RouteIcon />, action: () => onMenuItemClick('Optimize Route') },
   ];
 
