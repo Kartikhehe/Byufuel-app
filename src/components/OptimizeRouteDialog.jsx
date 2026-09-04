@@ -101,13 +101,22 @@ const [restaurantAmounts, setRestaurantAmounts] = useState({});
     if (open && step === 2) loadFleets();
   }, [open, step]);
 
-  // Helper function to calculate average from UCO pickup history array
-  const calculateAverageUCO = (history) => {
+  // Estimate per-restaurant demand from UCO pickup history using an
+  // Exponentially Weighted Moving Average (EWMA). Recent pickups are weighted
+  // more heavily than older ones, so the estimate tracks demand drift while
+  // smoothing out one-off spikes/dips. alpha=0.4 balances responsiveness vs noise.
+  const calculateAverageUCO = (history, alpha = 0.4) => {
     if (!history || !Array.isArray(history) || history.length === 0) {
       return 0;
     }
-    const sum = history.reduce((acc, val) => acc + (val || 0), 0);
-    return Math.round((sum / history.length) * 100) / 100; // Round to 2 decimal places
+    const values = history.filter((v) => v !== null && v !== undefined && !isNaN(v));
+    if (values.length === 0) return 0;
+
+    let ewma = values[0];
+    for (let i = 1; i < values.length; i++) {
+      ewma = alpha * values[i] + (1 - alpha) * ewma;
+    }
+    return Math.round(ewma * 100) / 100; // Round to 2 decimal places
   };
 
   // Load restaurants when step changes to 3
